@@ -1,5 +1,5 @@
 import logging
-
+from telegram.ext.dispatcher import run_async
 import async_streamer
 import telegram
 
