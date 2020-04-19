@@ -20,6 +20,7 @@ class Destiny(Core.DynamicCommand):
         import subprocess
 
         subprocess.Popen("start steam://rungameid/1085660", shell=True)
+        Core.send_message(update, "Starting Destiny 2")
         for _ in range(100):
             if not pywinauto.Desktop(backend="uia").windows(title_re="Destiny 2", visible_only=True):
                 time.sleep(1)
@@ -27,8 +28,11 @@ class Destiny(Core.DynamicCommand):
                 break
         time.sleep(10)
         pyautogui.moveTo(0, 0)
-        time.sleep(1)
+        time.sleep(0.5)
         pyautogui.click()
+        time.sleep(0.5)
+        pyautogui.click()
+        Core.send_message(update, "Destiny 2 started")
 
 
 dynamiccmds = [Destiny()]

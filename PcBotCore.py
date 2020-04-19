@@ -1,5 +1,6 @@
 import logging
 
+import async_streamer
 import telegram
 
 
@@ -47,6 +48,6 @@ def send_message(update: telegram.Update, text, parse_mode=None, disable_web_pag
     return sent
 
 
-t_bot = None
-queue = None
-downloads_directory = None
+t_bot: telegram.Bot = None
+queue: async_streamer.AsyncWriter = None
+downloads_directory: str = None

@@ -111,7 +111,10 @@ class DynamicCommands(Core.Command):
 
     @Core.run_async
     def execute(self, update, context):
-        Core.send_message(update, '\n'.join([f'/{i.name()} - {i.description()}' for i in dynamiccmds]))
+        try:
+            Core.send_message(update, '\n'.join([f'/{i.name()} - {i.description()}' for i in dynamiccmds.values() if i.can_showup()]))
+        except telegram.error.BadRequest:
+            Core.send_message(update, 'No dynamic command available')
 
 
 # Handles
@@ -198,8 +201,9 @@ if __name__ == '__main__':
     logging.basicConfig(stream=sys.stdout, level=logging.INFO, datefmt=log_date_format, format=log_format)
     # coloredlogs.install(stream=sys.stdout, level=logging.INFO, datefmt=log_date_format, fmt=log_format)
 
+    debug = False
+
     cmds = name_to_command([Status(), DynamicCommands(), *commands.commands, Start(), Commands(), Logs()])
-    debug = True
 
     try:
         dynamiccmds = name_to_command(dynamiccommands.dynamiccmds)
