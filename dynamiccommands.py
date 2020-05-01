@@ -19,6 +19,8 @@ class Destiny(Core.DynamicCommand):
         import pyautogui
         import subprocess
 
+        pyautogui.FAILSAFE = False
+
         subprocess.Popen("start steam://rungameid/1085660", shell=True)
         Core.send_message(update, "Starting Destiny 2")
         for _ in range(100):

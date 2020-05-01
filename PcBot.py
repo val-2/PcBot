@@ -148,14 +148,17 @@ def handle_text_dynamiccmds(update: telegram.Update, context: telegram.ext.Callb
     if chat_id == config.chat_id:
         if (command_str := message.split(" ")[0].lstrip("/")) in dynamiccmds:
             logging.info(f"Dynamic command received: {message}")
-            try:
-                dynamiccmds[command_str].execute(update, context)
-            except Exception as e:
-                if not debug:
-                    logging.error(update, f"Calling {command_str} threw {e}")
-                    Core.send_message(update, f"Calling {command_str} threw {e}")
-                else:
-                    raise
+            if not dynamiccmds[command_str].can_showup():
+                Core.send_message(update, f"The dynamic command {command_str} cannot be executed")
+            else:
+                try:
+                    dynamiccmds[command_str].execute(update, context)
+                except Exception as e:
+                    if not debug:
+                        logging.error(update, f"Calling {command_str} threw {e}")
+                        Core.send_message(update, f"Calling {command_str} threw {e}")
+                    else:
+                        raise
         else:
             logging.info(f"Message received: {message}")
             Core.queue.put(message)
