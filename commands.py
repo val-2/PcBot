@@ -87,26 +87,26 @@ class Mouse(Core.Command):
         reply_markup = Core.telegram.ReplyKeyboardMarkup(custom_keyboard)
 
         ratio = 4
-        self.execute.x_move = pyautogui.size()[0] // ratio
-        self.execute.y_move = pyautogui.size()[1] // ratio
+        self.x_move = pyautogui.size()[0] // ratio
+        self.y_move = pyautogui.size()[1] // ratio
 
         def reduce():
-            self.execute.x_move //= ratio
-            self.execute.y_move //= ratio
+            self.x_move //= ratio
+            self.y_move //= ratio
 
         def increase():
-            self.execute.x_move *= ratio
-            self.execute.y_move *= ratio
+            self.x_move *= ratio
+            self.y_move *= ratio
 
         actions = {
             custom_keyboard[0][0]: pyautogui.doubleClick,
-            custom_keyboard[0][1]: lambda: pyautogui.move(yOffset=-self.execute.y_move),
+            custom_keyboard[0][1]: lambda: pyautogui.move(yOffset=-self.y_move),
             custom_keyboard[0][2]: pyautogui.rightClick,
-            custom_keyboard[1][0]: lambda: pyautogui.move(xOffset=-self.execute.x_move),
+            custom_keyboard[1][0]: lambda: pyautogui.move(xOffset=-self.x_move),
             custom_keyboard[1][1]: pyautogui.click,
-            custom_keyboard[1][2]: lambda: pyautogui.move(xOffset=self.execute.x_move),
+            custom_keyboard[1][2]: lambda: pyautogui.move(xOffset=self.x_move),
             custom_keyboard[2][0]: reduce,
-            custom_keyboard[2][1]: lambda: pyautogui.move(yOffset=self.execute.y_move),
+            custom_keyboard[2][1]: lambda: pyautogui.move(yOffset=self.y_move),
             custom_keyboard[2][2]: increase,
         }
         Core.logging.info("Mouse control started")
@@ -348,7 +348,7 @@ class Download(Core.Command):
 
 class Lock(Core.Command):
     def name(self):
-        return 'Lock'
+        return 'lock'
 
     def description(self):
         return 'Lock session'

@@ -6,10 +6,12 @@ import logging
 import os.path
 import socket
 import sys
-from io import StringIO
+from importlib import reload
+from io import StringIO, BytesIO
 from time import sleep
 
 import telegram
+import urllib3
 from async_streamer import *
 from interceptor import *
 from telegram.ext import Updater, Filters, CommandHandler, MessageHandler
@@ -29,6 +31,21 @@ def name_to_command(c):
     for i in c:
         d[i.name()] = i
     return d
+
+
+def block_until_connected():
+    logged = False
+    while True:
+        try:
+            socket.setdefaulttimeout(10)
+            socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect(("1.1.1.1", 53))
+            break
+        except socket.error:
+            if not logged:
+                logging.warning("Connection lost")
+                logged = True
+            sleep(3)
+    logging.info("Connection established")
 
 
 # def command_std(update, args, shell=False, confirmation='🆗\n'):
@@ -86,7 +103,7 @@ class Commands(Core.Command):
 
     @Core.run_async
     def execute(self, update, context):
-        commands_list = [f'{i.name()} - {i.description()}' for i in cmds]
+        commands_list = [f'{i.name()} - {i.description()}' for i in cmds.values()]
         Core.send_message(update, "\n".join(commands_list))
 
 
@@ -99,7 +116,21 @@ class Logs(Core.Command):
 
     @Core.run_async
     def execute(self, update, context):
-        Core.send_message(update, sys.stdout.get_std(1).getvalue())
+        Core.t_bot.send_document(update.message.chat_id, document=BytesIO(sys.stdout.get_std(1).getvalue().encode()), filename='logs.txt')
+
+
+class Reload(Core.Command):
+    def name(self):
+        return 'reload'
+
+    def description(self):
+        return 'Reload all commands'
+
+    @Core.run_async
+    def execute(self, update, context):
+        reload(commands)
+        reload(dynamiccommands)
+        Core.send_message(update, "Commands reloaded")
 
 
 class DynamicCommands(Core.Command):
@@ -192,21 +223,31 @@ def handle_errors(update: telegram.Update, context: telegram.ext.CallbackContext
         logging.error(e)
         logging.critical('Stopping bot')
         os._exit(1)
+    except telegram.error.NetworkError:
+        pass
 
 
 if __name__ == '__main__':
+    try:
+        with open('logs.txt', 'r') as f:
+            lines = f.readlines()[-1000:]
+        with open('logs.txt', 'w') as f:
+            f.writelines(lines)
+    except FileNotFoundError:
+        pass
+
     stds = StringIO()
-    sys.stdout = Interceptor([sys.stdout, stds, open('logs.txt', 'a')])
-    sys.stderr = Interceptor([sys.stderr, stds, open('logs.txt', 'a')])
+    sys.stdout = Interceptor([sys.stdout, stds, open('logs.txt', 'a', encoding='UTF-8')])
+    sys.stderr = Interceptor([sys.stderr, stds, open('logs.txt', 'a', encoding='UTF-8')])
 
     log_date_format = '%Y-%m-%d %H:%M:%S'
     log_format = f'%(asctime)s {sys.platform} {getpass.getuser()} %(levelname)s %(message)s'
-    logging.basicConfig(stream=sys.stdout, level=logging.INFO, datefmt=log_date_format, format=log_format)
-    # coloredlogs.install(stream=sys.stdout, level=logging.INFO, datefmt=log_date_format, fmt=log_format)
+    logging.basicConfig(level=logging.INFO, datefmt=log_date_format, format=log_format, stream=sys.stdout)
+    # coloredlogs.install(stream=sys.stdout, level=logging.INFO, datefmt=log_date_format, fmt=log_format)    handlers=[logging.FileHandler('logs.txt', 'a', 'UTF-8'), logging.StreamHandler(sys.stdout)]
 
     debug = False
 
-    cmds = name_to_command([Status(), DynamicCommands(), *commands.commands, Start(), Commands(), Logs()])
+    cmds = name_to_command([Status(), DynamicCommands(), *commands.commands, Start(), Commands(), Logs(), Reload()])
 
     try:
         dynamiccmds = name_to_command(dynamiccommands.dynamiccmds)
@@ -227,15 +268,6 @@ if __name__ == '__main__':
     else:
         raise NotImplementedError
 
-    while True:
-        try:
-            socket.setdefaulttimeout(10)
-            socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect(("1.1.1.1", 53))
-            break
-        except socket.error:
-            logging.warning("Not connected to internet")
-            sleep(3)
-
     updater = Updater(token=config.bot_token, use_context=True,)
     dispatcher = updater.dispatcher
     Core.t_bot = telegram.Bot(token=config.bot_token)
@@ -252,12 +284,16 @@ if __name__ == '__main__':
     dispatcher.add_error_handler(handle_errors)
 
     updater.start_polling()
-    Start().execute(chat_id=config.chat_id)
+    # Start().execute(chat_id=config.chat_id)
     logging.info("Bot started")
 
     while True:
         try:
-            Core.t_bot.send_chat_action(chat_id=config.chat_id, action=telegram.ChatAction.TYPING)
             sleep(4)
+            Core.t_bot.send_chat_action(chat_id=config.chat_id, action=telegram.ChatAction.TYPING)
         except telegram.error.TimedOut:
             pass
+        except KeyboardInterrupt:
+            os._exit(1)
+        except (urllib3.exceptions.HTTPError, telegram.error.NetworkError):
+            block_until_connected()
