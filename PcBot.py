@@ -284,7 +284,7 @@ if __name__ == '__main__':
     dispatcher.add_error_handler(handle_errors)
 
     updater.start_polling()
-    # Start().execute(chat_id=config.chat_id)
+    Start().execute(chat_id=config.chat_id)
     logging.info("Bot started")
 
     while True:

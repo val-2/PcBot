@@ -527,6 +527,10 @@ class Volume(Core.Command):
 
 
 class MsgBox(Core.Command):
+    def __init__(self):
+        import wx
+        self.app = wx.App()
+
     def name(self):
         return 'msgbox'
 
@@ -535,7 +539,11 @@ class MsgBox(Core.Command):
 
     @Core.run_async
     def execute(self, update, context):
-        import wx
+        import tkinter
+        root = tkinter.Tk()
+        root.withdraw()
+
+        from tkinter import messagebox
         import Xlib
 
         args = Core.join_args(update)
@@ -543,7 +551,9 @@ class MsgBox(Core.Command):
         Core.send_message(update, "MessageBox showed")
         try:
             import pyautogui
-            wx.MessageBox(args, "Alert")
+            messagebox.showinfo(message=args)
+            root.update()
+
         except (KeyError, Xlib.error.DisplayConnectionError):
             print(args)
         Core.logging.info("MessageBox accepted")
