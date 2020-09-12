@@ -133,6 +133,20 @@ class Reload(Core.Command):
         Core.send_message(update, "Commands reloaded")
 
 
+class Stop(Core.Command):
+    def name(self):
+        return 'stop'
+
+    def description(self):
+        return 'Stop bot execution'
+
+    @Core.run_async
+    def execute(self, update, context):
+        logging.info('Stopping bot by user command')
+        Core.send_message(update, 'Stopping bot...')
+        os._exit(1)
+
+
 class DynamicCommands(Core.Command):
     def name(self):
         return 'dynamiccommands'
@@ -220,14 +234,14 @@ def handle_errors(update: telegram.Update, context: telegram.ext.CallbackContext
     try:
         raise context.error
     except telegram.error.Conflict as e:
-        logging.error(e)
-        logging.critical('Stopping bot')
+        logging.critical(f'Stopping bot. Other bot instance detected. Exception:\n{e}')
         os._exit(1)
     except telegram.error.NetworkError:
         pass
 
 
 if __name__ == '__main__':
+    logs_exception = ''
     try:
         with open('logs.txt', 'r') as f:
             lines = f.readlines()[-1000:]
@@ -235,6 +249,8 @@ if __name__ == '__main__':
             f.writelines(lines)
     except FileNotFoundError:
         pass
+    except Exception as e:
+        logs_exception = e
 
     stds = StringIO()
     sys.stdout = Interceptor([sys.stdout, stds, open('logs.txt', 'a', encoding='UTF-8')])
@@ -256,14 +272,12 @@ if __name__ == '__main__':
 
     if sys.platform == "win32":
         import winreg
-
         sub_key = r'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders'
         downloads_guid = '{374DE290-123F-4565-9164-39C4925E467B}'
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, sub_key) as key:
             Core.downloads_directory = winreg.QueryValueEx(key, downloads_guid)[0]
     elif sys.platform == "linux":
         from gi.repository import GLib
-
         Core.downloads_directory = GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_DOWNLOAD)
     else:
         raise NotImplementedError
@@ -283,7 +297,16 @@ if __name__ == '__main__':
     dispatcher.add_handler(MessageHandler(Filters.all, unknown))
     dispatcher.add_error_handler(handle_errors)
 
-    updater.start_polling()
+    while True:
+        try:
+            updater.start_polling()
+            break
+        except telegram.error.NetworkError:
+            block_until_connected()
+
+    if logs_exception:
+        Core.t_bot.send_message(chat_id=config.chat_id, text=f"Exception while handling logs:\n{logs_exception}")
+
     Start().execute(chat_id=config.chat_id)
     logging.info("Bot started")
 
@@ -297,3 +320,6 @@ if __name__ == '__main__':
             os._exit(1)
         except (urllib3.exceptions.HTTPError, telegram.error.NetworkError):
             block_until_connected()
+        except Exception as e:
+            logging.error(f'Exception not handled:\n')
+            raise e
