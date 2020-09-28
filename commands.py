@@ -67,7 +67,7 @@ class Keyboard(Core.Command):
         Core.send_message(update, f'"{args}" written')
 
 
-class Mouse(Core.Command):
+class Mouse(Core.Command):  # TODO grid showing where pointer can move and screen after no response for 3 seconds
     def name(self):
         return 'mouse'
 
@@ -77,58 +77,89 @@ class Mouse(Core.Command):
     @Core.run_async
     def execute(self, update, context):
         import pyautogui
-        import time
 
         pyautogui.FAILSAFE = False
 
         custom_keyboard = [['double click', '⬆', 'right click'],
-                           ['⬅', 'left click', '➡'],
-                           ['reduce', '⬇', 'increase']]
+                           ['⬅',       'left click',       '➡'],
+                           ['reduce',       '⬇',   'increase']]
         reply_markup = Core.telegram.ReplyKeyboardMarkup(custom_keyboard)
 
-        ratio = 4
-        self.x_move = pyautogui.size()[0] // ratio
-        self.y_move = pyautogui.size()[1] // ratio
-
-        def reduce():
-            self.x_move //= ratio
-            self.y_move //= ratio
+        self.multiplier = 0.25
 
         def increase():
-            self.x_move *= ratio
-            self.y_move *= ratio
+            self.multiplier *= 4
+
+        def reduce():
+            self.multiplier /= 4
 
         actions = {
             custom_keyboard[0][0]: pyautogui.doubleClick,
-            custom_keyboard[0][1]: lambda: pyautogui.move(yOffset=-self.y_move),
+            custom_keyboard[0][1]: lambda: pyautogui.move(yOffset=-pyautogui.size()[1] * self.multiplier),
             custom_keyboard[0][2]: pyautogui.rightClick,
-            custom_keyboard[1][0]: lambda: pyautogui.move(xOffset=-self.x_move),
+            custom_keyboard[1][0]: lambda: pyautogui.move(xOffset=-pyautogui.size()[0] * self.multiplier),
             custom_keyboard[1][1]: pyautogui.click,
-            custom_keyboard[1][2]: lambda: pyautogui.move(xOffset=self.x_move),
+            custom_keyboard[1][2]: lambda: pyautogui.move(xOffset=pyautogui.size()[0] * self.multiplier),
             custom_keyboard[2][0]: reduce,
-            custom_keyboard[2][1]: lambda: pyautogui.move(yOffset=self.y_move),
+            custom_keyboard[2][1]: lambda: pyautogui.move(yOffset=pyautogui.size()[1] * self.multiplier),
             custom_keyboard[2][2]: increase,
         }
         Core.logging.info("Mouse control started")
         Core.send_message(update, "Enter", reply_markup=reply_markup)
 
-        Screen().execute(update, context, ignore_args=True)
-        last = time.time()
-
         while True:
-            message = Core.queue.get()[0]
-            if message in actions:
-                actions[message]()
-                Core.logging.debug("Mouse action executed")
-            elif message.lower() == "🆗":
+            if not (message := Core.queue.get(timeout=3, reset_before_start=False, reset_after_return=True)):
+                self.send_grid(update, context)
+                Core.queue.get(reset_before_start=False)
+                continue
+            if message[0] in actions:
+                actions[message[0]]()
+                Core.logging.info("Mouse action executed")
+            elif message[0].lower() == "🆗":
                 Core.send_message(update, "Exited", reply_markup=Core.telegram.ReplyKeyboardRemove())
                 Core.logging.info("Mouse control terminated")
                 break
             else:
                 pyautogui.write(message)
-            if time.time() - last > 6:
-                Screen().execute(update, context, ignore_args=True)
-                last = time.time()
+                Core.logging.info("Keypresses executed")
+
+    def send_grid(self, update, context):
+        import pyautogui
+        import screen
+        from PIL import Image, ImageDraw
+        import io
+
+        pyautogui.FAILSAFE = False
+
+        s = screen.screenshot(nparray=False)
+        Core.logging.debug("Screenshot taken")
+        Core.t_bot.send_chat_action(chat_id=update.message.chat_id, action=Core.telegram.ChatAction.UPLOAD_PHOTO)
+        im = Image.frombytes("RGB", s.size, s.bgra, "raw", "BGRX")
+
+        horizontal_pos = [i for i in range(int(pyautogui.position().x % (pyautogui.size()[0] * self.multiplier)), pyautogui.size()[0], int(pyautogui.size()[0] * self.multiplier))]
+        vertical_pos = [i for i in range(int(pyautogui.position().y % (pyautogui.size()[1] * self.multiplier)), pyautogui.size()[1], int(pyautogui.size()[1] * self.multiplier))]
+        for x in horizontal_pos:
+            for y in vertical_pos:
+                ImageDraw.ImageDraw(im, "RGBA").polygon(self.pointer_coords(x, y), fill=(0, 0, 0, 100), outline=(255, 255, 255, 100))
+
+        ImageDraw.ImageDraw(im).polygon(self.pointer_coords(pyautogui.position().x, pyautogui.position().y), fill="white", outline="black")
+
+        f = io.BytesIO()
+        im.save(f, format="png", optimize=True)
+        f2 = io.BytesIO(f.getvalue())
+
+        if len(f2.getvalue()) < 200000:
+            context.bot.send_document(update.message.chat_id, f2, filename="screen.png")
+        else:
+            f = io.BytesIO()
+            im.save(f, format="jpeg", optimize=True)
+            f2 = io.BytesIO(f.getvalue())
+            context.bot.send_document(update.message.chat_id, f2, filename="screen.jpg")
+        Core.logging.debug("Screenshot sent")
+
+    @staticmethod
+    def pointer_coords(x, y):
+        return x, y, x, y+17, x+5, y+12, x+12, y+12
 
 
 class Cmd(Core.Command):

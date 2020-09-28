@@ -12,13 +12,13 @@ from time import sleep
 
 import telegram
 import urllib3
-from async_streamer import *
 from interceptor import *
 from telegram.ext import Updater, Filters, CommandHandler, MessageHandler
 
 import PcBotCore as Core
 import commands
 import config
+from async_streamer import *
 
 try:
     import dynamiccommands
@@ -42,7 +42,7 @@ def block_until_connected():
             break
         except socket.error:
             if not logged:
-                logging.warning("Connection lost")
+                logging.warning("Waiting for connection...")
                 logged = True
             sleep(3)
     logging.info("Connection established")
@@ -128,7 +128,7 @@ class Reload(Core.Command):
 
     @Core.run_async
     def execute(self, update, context):
-        reload(commands)
+        reload(commands)  # TODO Classes are not reloaded
         reload(dynamiccommands)
         Core.send_message(update, "Commands reloaded")
 
@@ -156,9 +156,9 @@ class DynamicCommands(Core.Command):
 
     @Core.run_async
     def execute(self, update, context):
-        try:
-            Core.send_message(update, '\n'.join([f'/{i.name()} - {i.description()}' for i in dynamiccmds.values() if i.can_showup()]))
-        except telegram.error.BadRequest:
+        if dynlist := '\n'.join([f'/{i.name()} - {i.description()}' for i in dynamiccmds.values() if i.can_showup()]):
+            Core.send_message(update, dynlist)
+        else:
             Core.send_message(update, 'No dynamic command available')
 
 
@@ -296,6 +296,8 @@ if __name__ == '__main__':
     dispatcher.add_handler(MessageHandler(Filters.entity(telegram.MessageEntity.BOT_COMMAND), handle_commands))
     dispatcher.add_handler(MessageHandler(Filters.all, unknown))
     dispatcher.add_error_handler(handle_errors)
+
+    block_until_connected()
 
     while True:
         try:
