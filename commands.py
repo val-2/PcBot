@@ -422,8 +422,8 @@ class Logout(Core.Command):
         if not args:
             args = "0"
         time.sleep(int(args))
-        Core.logging.info("Current user core.logging output")
-        Core.send_message(update, f"{getpass.getuser()} core.logging output")
+        Core.logging.info('Logging out current user')
+        Core.send_message(update, f"{getpass.getuser()}: log out")
         if sys.platform == "linux":
             subprocess.Popen(["logout"])
         elif sys.platform == "win32":
