@@ -1,7 +1,8 @@
 import logging
-from telegram.ext.dispatcher import run_async
-import async_streamer
+
 import telegram
+
+import async_streamer
 
 
 class Command:
@@ -49,5 +50,5 @@ def send_message(update: telegram.Update, text, parse_mode=None, disable_web_pag
 
 
 t_bot: telegram.Bot = None
-queue: async_streamer.AsyncWriter = None
+msg_queue: async_streamer.AsyncWriter = None
 downloads_directory: str = None

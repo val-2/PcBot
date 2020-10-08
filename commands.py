@@ -25,9 +25,7 @@ class Screen(Core.Command):
         Core.logging.debug("Screenshot taken")
         im = Image.frombytes("RGB", s.size, s.bgra, "raw", "BGRX")
         if cursor:
-            pos = pyautogui.position()
-            radius = 7
-            ImageDraw.ImageDraw(im).ellipse((pos.x - radius, pos.y - radius, pos.x + radius, pos.y + radius), fill="white", outline="black")
+            ImageDraw.ImageDraw(im).polygon(self.pointer_coords(pyautogui.position().x, pyautogui.position().y), fill="white", outline="black")
 
         f = io.BytesIO()
         im.save(f, format="png", optimize=True)
@@ -46,6 +44,10 @@ class Screen(Core.Command):
             f2 = io.BytesIO(f.getvalue())
             context.bot.send_document(update.message.chat_id, f2, filename="screen.jpg")
         Core.logging.debug("Screenshot sent")
+
+    @staticmethod
+    def pointer_coords(x, y):
+        return x, y, x, y + 17, x + 5, y + 12, x + 12, y + 12
 
 
 class Keyboard(Core.Command):
@@ -67,7 +69,7 @@ class Keyboard(Core.Command):
         Core.send_message(update, f'"{args}" written')
 
 
-class Mouse(Core.Command):  # TODO grid showing where pointer can move and screen after no response for 3 seconds
+class Mouse(Core.Command):  # TODO when multiplier too small too many pointers
     def name(self):
         return 'mouse'
 
@@ -94,23 +96,23 @@ class Mouse(Core.Command):  # TODO grid showing where pointer can move and scree
             self.multiplier /= 4
 
         actions = {
-            custom_keyboard[0][0]: pyautogui.doubleClick,
-            custom_keyboard[0][1]: lambda: pyautogui.move(yOffset=-pyautogui.size()[1] * self.multiplier),
-            custom_keyboard[0][2]: pyautogui.rightClick,
-            custom_keyboard[1][0]: lambda: pyautogui.move(xOffset=-pyautogui.size()[0] * self.multiplier),
-            custom_keyboard[1][1]: pyautogui.click,
-            custom_keyboard[1][2]: lambda: pyautogui.move(xOffset=pyautogui.size()[0] * self.multiplier),
-            custom_keyboard[2][0]: reduce,
-            custom_keyboard[2][1]: lambda: pyautogui.move(yOffset=pyautogui.size()[1] * self.multiplier),
-            custom_keyboard[2][2]: increase,
+            'double click': pyautogui.doubleClick,
+            '⬆': lambda: pyautogui.move(yOffset=-pyautogui.size()[1] * self.multiplier, xOffset=0),
+            'right click': pyautogui.rightClick,
+            '⬅': lambda: pyautogui.move(xOffset=-pyautogui.size()[0] * self.multiplier, yOffset=0),
+            'left click': pyautogui.click,
+            '➡': lambda: pyautogui.move(xOffset=pyautogui.size()[0] * self.multiplier, yOffset=0),
+            'reduce': reduce,
+            '⬇': lambda: pyautogui.move(yOffset=pyautogui.size()[1] * self.multiplier, xOffset=0),
+            'increase': increase,
         }
         Core.logging.info("Mouse control started")
         Core.send_message(update, "Enter", reply_markup=reply_markup)
 
         while True:
-            if not (message := Core.queue.get(timeout=3, reset_before_start=False, reset_after_return=True)):
+            if not (message := Core.msg_queue.get(timeout=3, reset_before_start=False, reset_after_return=True)):
                 self.send_grid(update, context)
-                Core.queue.get(reset_before_start=False)
+                Core.msg_queue.get(reset_before_start=False)
                 continue
             if message[0] in actions:
                 actions[message[0]]()
@@ -197,7 +199,7 @@ class Cmd(Core.Command):
                     else:
                         Core.logging.warning("Network error")
 
-            inputs = Core.queue.get(0)
+            inputs = Core.msg_queue.get(0)
             for i in inputs:
                 p.stdin.write(i + "\n")
                 p.stdin.flush()
@@ -206,7 +208,7 @@ class Cmd(Core.Command):
                 message += confirmation
                 sent.edit_text(message)
                 break
-        Core.logging.info("core.Command executed")
+        Core.logging.info("Command executed")
         return output
 
 
@@ -292,7 +294,7 @@ class Torrent(Core.Command):
                 last_message = message
 
             if times < 5:
-                args = Core.queue.get(3)
+                args = Core.msg_queue.get(3)
                 times += 1
             else:
                 time.sleep(3)
@@ -319,7 +321,7 @@ class Download(Core.Command):
                 self._download(update, link=a)
                 times = 0
 
-            args = Core.queue.get(3)
+            args = Core.msg_queue.get(3)
             times += 1
 
     @staticmethod
@@ -566,7 +568,7 @@ class MsgBox(Core.Command):
         return 'msgbox'
 
     def description(self):
-        return 'Display a messagebox'  # TODO
+        return 'Display a messagebox'
 
     @Core.run_async
     def execute(self, update, context):

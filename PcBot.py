@@ -6,7 +6,6 @@ import logging
 import os.path
 import socket
 import sys
-from importlib import reload
 from io import StringIO, BytesIO
 from time import sleep
 
@@ -22,8 +21,9 @@ from async_streamer import *
 
 try:
     import dynamiccommands
+    dynamiccmds = dynamiccommands.dynamiccmds
 except ModuleNotFoundError:
-    pass
+    dynamiccmds = []
 
 
 def name_to_command(c):
@@ -38,7 +38,7 @@ def block_until_connected():
     while True:
         try:
             socket.setdefaulttimeout(10)
-            socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect(("1.1.1.1", 53))
+            socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect(("api.telegram.org", 53))
             break
         except socket.error:
             if not logged:
@@ -46,16 +46,6 @@ def block_until_connected():
                 logged = True
             sleep(3)
     logging.info("Connection established")
-
-
-# def command_std(update, args, shell=False, confirmation='🆗\n'):
-#     output = check_output(args, shell, stderr=STDOUT, text=True)
-#     logging.debug(f"Bash command executed: {args if shell else ' '.join(args)}")
-#     logging.debug(f"Output: {output}")
-#     output += confirmation
-#     if output:
-#         core.send_message(update, output)
-#     return output
 
 
 # def restart(update: telegram.Update, context: telegram.ext.CallbackContext):
@@ -128,8 +118,17 @@ class Reload(Core.Command):
 
     @Core.run_async
     def execute(self, update, context):
-        reload(commands)  # TODO Classes are not reloaded
-        reload(dynamiccommands)
+        del sys.modules['dynamiccommands']
+        import dynamiccommands
+        global dynamiccmds
+        dynamiccmds = name_to_command(dynamiccommands.dynamiccmds)
+
+        del sys.modules['commands']
+        import commands
+        global cmds
+        cmds = name_to_command([Status(), DynamicCommands(), *commands.commands, Start(), Commands(), Logs(), Reload()])
+        dispatcher.handlers[0][0] = CommandHandler(cmds, handle_commands)
+
         Core.send_message(update, "Commands reloaded")
 
 
@@ -190,23 +189,29 @@ def handle_commands(update: telegram.Update, context: telegram.ext.CallbackConte
 def handle_text_dynamiccmds(update: telegram.Update, context: telegram.ext.CallbackContext):
     message = update.message.text
     chat_id = update.message.chat_id
+
     if chat_id == config.chat_id:
-        if (command_str := message.split(" ")[0].lstrip("/")) in dynamiccmds:
-            logging.info(f"Dynamic command received: {message}")
-            if not dynamiccmds[command_str].can_showup():
-                Core.send_message(update, f"The dynamic command {command_str} cannot be executed")
+        if message[0] == '/':
+            if (command_str := message.split(" ")[0].lstrip("/")) in dynamiccmds:
+                logging.info(f"Dynamic command received: {message}")
+                if not dynamiccmds[command_str].can_showup():
+                    Core.send_message(update, f"The dynamic command {command_str} cannot be executed")
+                    logging.warning(f"The dynamic command {command_str} cannot be executed")
+                else:
+                    try:
+                        dynamiccmds[command_str].execute(update, context)
+                    except Exception as e:
+                        if not debug:
+                            logging.error(update, f"Calling {command_str} threw {e}")
+                            Core.send_message(update, f"Calling {command_str} threw {e}")
+                        else:
+                            raise
             else:
-                try:
-                    dynamiccmds[command_str].execute(update, context)
-                except Exception as e:
-                    if not debug:
-                        logging.error(update, f"Calling {command_str} threw {e}")
-                        Core.send_message(update, f"Calling {command_str} threw {e}")
-                    else:
-                        raise
+                logging.info(f"Unknown dynamic command: {message}")
+                Core.send_message(update, f"Unknown dynamic command: {message}")
         else:
             logging.info(f"Message received: {message}")
-            Core.queue.put(message)
+            Core.msg_queue.put(message)
     else:
         logging.critical(update)
         Core.send_message(update, "SOS\n" + str(update))
@@ -243,10 +248,11 @@ def handle_errors(update: telegram.Update, context: telegram.ext.CallbackContext
 if __name__ == '__main__':
     logs_exception = ''
     try:
-        with open('logs.txt', 'r') as f:
-            lines = f.readlines()[-1000:]
-        with open('logs.txt', 'w') as f:
-            f.writelines(lines)
+        with open('testlines.txt', 'r+') as f:  # open in read / write mode
+            data = f.readlines()  # read the rest
+            f.seek(0)  # set the cursor to the top of the file
+            f.writelines(data[-1000:])  # write the data back
+            f.truncate()  # set the file size to the current size
     except FileNotFoundError:
         pass
     except Exception as e:
@@ -264,11 +270,7 @@ if __name__ == '__main__':
     debug = False
 
     cmds = name_to_command([Status(), DynamicCommands(), *commands.commands, Start(), Commands(), Logs(), Reload()])
-
-    try:
-        dynamiccmds = name_to_command(dynamiccommands.dynamiccmds)
-    except NameError:
-        dynamiccmds = {}
+    dynamiccmds = name_to_command(dynamiccmds)
 
     if sys.platform == "win32":
         import winreg
@@ -286,7 +288,7 @@ if __name__ == '__main__':
     dispatcher = updater.dispatcher
     Core.t_bot = telegram.Bot(token=config.bot_token)
 
-    Core.queue = AsyncWriter()
+    Core.msg_queue = AsyncWriter()
 
     dispatcher.add_handler(CommandHandler(cmds, handle_commands))
 
