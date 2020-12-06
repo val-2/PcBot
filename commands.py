@@ -8,7 +8,6 @@ class Screen(Core.Command):
     def description(self):
         return 'Get a screenshot'
 
-    @Core.run_async
     def execute(self, update, context, ignore_args=False, cursor=True, lossless=None):
         import pyautogui
         import screen
@@ -57,7 +56,6 @@ class Keyboard(Core.Command):
     def description(self):
         return 'Send keystrokes'
 
-    @Core.run_async
     def execute(self, update, context):
         import pyautogui
 
@@ -76,7 +74,6 @@ class Mouse(Core.Command):  # TODO when multiplier too small too many pointers
     def description(self):
         return 'Emulate mouse'
 
-    @Core.run_async
     def execute(self, update, context):
         import pyautogui
 
@@ -171,7 +168,6 @@ class Cmd(Core.Command):
     def description(self):
         return 'Execute command'
 
-    @Core.run_async
     def execute(self, update, context, args=None, confirmation='🆗\n', shell=True):
         import subprocess
         import async_streamer
@@ -219,7 +215,6 @@ class Ip(Core.Command):
     def description(self):
         return 'Get locan and external IP'
 
-    @Core.run_async
     def execute(self, update, context):
         import requests
 
@@ -246,7 +241,6 @@ class Torrent(Core.Command):
     def description(self):
         return 'Download a torrent'
 
-    @Core.run_async
     def execute(self, update, context):
         import subprocess
         import sys
@@ -309,7 +303,6 @@ class Download(Core.Command):
     def description(self):
         return 'Download a file'
 
-    @Core.run_async
     def execute(self, update, context):
         args = Core.join_args(update).split()
         times = 0
@@ -356,11 +349,11 @@ class Download(Core.Command):
 
         filename = name
         i = 0
-        while os.path.exists(os.path.join(Core.downloads_directory, filename)):
+        while os.path.exists(os.path.join(Core.media, filename)):
             i += 1
             filename = f"{os.path.splitext(name)[0]} ({i}){os.path.splitext(name)[1]}"
 
-        with open(os.path.join(Core.downloads_directory, filename), "wb") as f:
+        with open(os.path.join(Core.media, filename), "wb") as f:
             for chunk in r.iter_content(chunk_size=2 ** 22):
                 f.write(chunk)
                 downloaded_bites += len(chunk)
@@ -386,7 +379,6 @@ class Lock(Core.Command):
     def description(self):
         return 'Lock session'
 
-    @Core.run_async
     def execute(self, update, context):
         import time
         import sys
@@ -398,11 +390,10 @@ class Lock(Core.Command):
             args = "0"
         time.sleep(int(args))
         if sys.platform == "linux":
-            if subprocess.run(["xdg-screensaver", "lock"]).returncode == 4:
-                pass
+            subprocess.check_output(["loginctl", "lock-session"])
         elif sys.platform == "win32":
-            subprocess.Popen("rundll32.exe user32.dll,LockWorkStation", shell=True)
-        Core.send_message(update, f"{getpass.getuser()} screen locked")
+            subprocess.check_output("rundll32.exe user32.dll,LockWorkStation", shell=True)
+        Core.send_message(update, f"{getpass.getuser()}'s screen locked")
         Core.logging.info("Screen locked")
 
 
@@ -413,7 +404,6 @@ class Logout(Core.Command):
     def description(self):
         return 'Log out current user'
 
-    @Core.run_async
     def execute(self, update, context):
         import time
         import subprocess
@@ -427,9 +417,9 @@ class Logout(Core.Command):
         Core.logging.info('Logging out current user')
         Core.send_message(update, f"{getpass.getuser()}: log out")
         if sys.platform == "linux":
-            subprocess.Popen(["logout"])
+            subprocess.check_output(["loginctl", "terminate-session"])
         elif sys.platform == "win32":
-            subprocess.Popen(f"shutdown -l -f", shell=True)
+            subprocess.check_output(f"shutdown -l -f", shell=True)
 
 
 class Suspend(Core.Command):
@@ -439,7 +429,6 @@ class Suspend(Core.Command):
     def description(self):
         return 'Suspend session'
 
-    @Core.run_async
     def execute(self, update, context):
         import time
         import subprocess
@@ -452,9 +441,9 @@ class Suspend(Core.Command):
         Core.logging.info("Suspending system")
         Core.send_message(update, "Suspending system")
         if sys.platform == "linux":
-            subprocess.Popen(["systemctl", "suspend"])
+            subprocess.check_output(["systemctl", "suspend"])
         elif sys.platform == "win32":
-            subprocess.Popen(f".\\nircmdc.exe standby", shell=True)
+            subprocess.check_output(f".\\nircmdc.exe standby", shell=True)
 
 
 class Hibernate(Core.Command):
@@ -464,7 +453,6 @@ class Hibernate(Core.Command):
     def description(self):
         return 'Hibernate computer'
 
-    @Core.run_async
     def execute(self, update, context):
         import time
         import subprocess
@@ -477,9 +465,9 @@ class Hibernate(Core.Command):
         Core.logging.info("Hibernating system")
         Core.send_message(update, "Hibernating system")
         if sys.platform == "linux":
-            subprocess.Popen(["systemctl", "hibernate"])
+            subprocess.check_output(["systemctl", "hibernate"])
         elif sys.platform == "win32":
-            subprocess.Popen(f"shutdown -h", shell=True)
+            subprocess.check_output(f"shutdown -h", shell=True)
 
 
 class Reboot(Core.Command):
@@ -489,7 +477,6 @@ class Reboot(Core.Command):
     def description(self):
         return 'Reboot computer'
 
-    @Core.run_async
     def execute(self, update, context):
         args = Core.join_args(update)
         if not args:
@@ -501,9 +488,9 @@ class Reboot(Core.Command):
         Core.send_message(update, "Rebooting system")
         if sys.platform == "linux":
             time.sleep(int(args))
-            subprocess.Popen(["reboot"])
+            subprocess.check_output(["reboot"])
         elif sys.platform == "win32":
-            subprocess.Popen(f"shutdown -r -f -t {args}", shell=True)
+            subprocess.check_output(f"shutdown -r -f -t {args}", shell=True)
 
 
 class Shutdown(Core.Command):
@@ -513,7 +500,6 @@ class Shutdown(Core.Command):
     def description(self):
         return 'Shut down computer'
 
-    @Core.run_async
     def execute(self, update, context):
         import time
         import subprocess
@@ -537,7 +523,6 @@ class Volume(Core.Command):
     def description(self):
         return 'Change volume'
 
-    @Core.run_async
     def execute(self, update, context):
         import subprocess
         import sys
@@ -560,17 +545,12 @@ class Volume(Core.Command):
 
 
 class MsgBox(Core.Command):
-    def __init__(self):
-        import wx
-        self.app = wx.App()
-
     def name(self):
         return 'msgbox'
 
     def description(self):
         return 'Display a messagebox'
 
-    @Core.run_async
     def execute(self, update, context):
         import tkinter
         root = tkinter.Tk()

@@ -1,7 +1,6 @@
 import logging
-from telegram.ext.dispatcher import run_async
 import async_streamer
-import telegram
+import telegram.ext
 
 
 class Command:
@@ -11,7 +10,7 @@ class Command:
     def description(self):
         raise NotImplementedError
 
-    def execute(self, update, context):
+    def execute(self, update: telegram.Update, context: telegram.ext.CallbackContext):
         raise NotImplementedError
 
 
@@ -26,7 +25,7 @@ class DynamicCommand:
     def can_showup(self):
         return True
 
-    def execute(self, update, context):
+    def execute(self, update: telegram.Update, context: telegram.ext.CallbackContext):
         raise NotImplementedError
 
 
@@ -44,10 +43,11 @@ def send_message(update: telegram.Update, text, parse_mode=None, disable_web_pag
             if str(e) != "urllib3 HTTPError [SSL: DECRYPTION_FAILED_OR_BAD_RECORD_MAC] decryption failed or bad record mac (_ssl.c:2508)":
                 raise
             else:
-                logging.warning("Network error")
+                logging.warning(f'Network error while sending message "{text}" to {update.message.chat.first_name}. Retrying...')
     return sent
 
 
 t_bot: telegram.Bot = None
 msg_queue: async_streamer.AsyncWriter = None
-downloads_directory: str = None
+home: str = None
+media: str = None

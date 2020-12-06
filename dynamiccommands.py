@@ -12,7 +12,6 @@ class Destiny(Core.DynamicCommand):
         import sys
         return sys.platform == 'win32'
 
-    @Core.run_async
     def execute(self, update, context):
         import pywinauto
         import time
