@@ -8,20 +8,23 @@ class Screen(Core.Command):
     def description(self):
         return 'Get a screenshot'
 
+    def requirements(self):
+        return ['pyautogui', 'pillow', 'screenmss']
+
     def execute(self, update, context, ignore_args=False, cursor=True, lossless=None):
         import pyautogui
-        import screen
+        import screenmss
         from PIL import Image, ImageDraw
         import io
 
         pyautogui.FAILSAFE = False
 
         args = Core.join_args(update)
-        s = screen.screenshot(nparray=False)
+        s = screenmss.screenshot(nparray=False)
         Core.t_bot.send_chat_action(chat_id=update.message.chat_id, action=Core.telegram.ChatAction.UPLOAD_PHOTO)
         if args and not ignore_args:
             lossless = True
-        Core.logging.debug("Screenshot taken")
+        Core.logger.debug("Screenshot taken")
         im = Image.frombytes("RGB", s.size, s.bgra, "raw", "BGRX")
         if cursor:
             ImageDraw.ImageDraw(im).polygon(self.pointer_coords(pyautogui.position().x, pyautogui.position().y), fill="white", outline="black")
@@ -42,7 +45,7 @@ class Screen(Core.Command):
             im.save(f, format="jpeg", optimize=True)
             f2 = io.BytesIO(f.getvalue())
             context.bot.send_document(update.message.chat_id, f2, filename="screen.jpg")
-        Core.logging.debug("Screenshot sent")
+        Core.logger.debug("Screenshot sent")
 
     @staticmethod
     def pointer_coords(x, y):
@@ -56,6 +59,9 @@ class Keyboard(Core.Command):
     def description(self):
         return 'Send keystrokes'
 
+    def requirements(self):
+        return ['pyautogui']
+
     def execute(self, update, context):
         import pyautogui
 
@@ -63,7 +69,7 @@ class Keyboard(Core.Command):
 
         args = Core.join_args(update)
         pyautogui.write(args)
-        Core.logging.debug(f'Keys written: {args}')
+        Core.logger.debug(f'Keys written: {args}')
         Core.send_message(update, f'"{args}" written')
 
 
@@ -73,6 +79,9 @@ class Mouse(Core.Command):  # TODO when multiplier too small too many pointers
 
     def description(self):
         return 'Emulate mouse'
+
+    def requirements(self):
+        return ['pyautogui', 'pillow', 'screenmss']
 
     def execute(self, update, context):
         import pyautogui
@@ -103,7 +112,7 @@ class Mouse(Core.Command):  # TODO when multiplier too small too many pointers
             '⬇': lambda: pyautogui.move(yOffset=pyautogui.size()[1] * self.multiplier, xOffset=0),
             'increase': increase,
         }
-        Core.logging.info("Mouse control started")
+        Core.logger.info("Mouse control started")
         Core.send_message(update, "Enter", reply_markup=reply_markup)
 
         while True:
@@ -113,25 +122,25 @@ class Mouse(Core.Command):  # TODO when multiplier too small too many pointers
                 continue
             if message[0] in actions:
                 actions[message[0]]()
-                Core.logging.info("Mouse action executed")
+                Core.logger.info("Mouse action executed")
             elif message[0].lower() == "🆗":
                 Core.send_message(update, "Exited", reply_markup=Core.telegram.ReplyKeyboardRemove())
-                Core.logging.info("Mouse control terminated")
+                Core.logger.info("Mouse control terminated")
                 break
             else:
                 pyautogui.write(message)
-                Core.logging.info("Keypresses executed")
+                Core.logger.info("Keypresses executed")
 
     def send_grid(self, update, context):
         import pyautogui
-        import screen
+        import screenmss
         from PIL import Image, ImageDraw
         import io
 
         pyautogui.FAILSAFE = False
 
-        s = screen.screenshot(nparray=False)
-        Core.logging.debug("Screenshot taken")
+        s = screenmss.screenshot(nparray=False)
+        Core.logger.debug("Screenshot taken")
         Core.t_bot.send_chat_action(chat_id=update.message.chat_id, action=Core.telegram.ChatAction.UPLOAD_PHOTO)
         im = Image.frombytes("RGB", s.size, s.bgra, "raw", "BGRX")
 
@@ -154,7 +163,7 @@ class Mouse(Core.Command):  # TODO when multiplier too small too many pointers
             im.save(f, format="jpeg", optimize=True)
             f2 = io.BytesIO(f.getvalue())
             context.bot.send_document(update.message.chat_id, f2, filename="screen.jpg")
-        Core.logging.debug("Screenshot sent")
+        Core.logger.debug("Screenshot sent")
 
     @staticmethod
     def pointer_coords(x, y):
@@ -193,7 +202,7 @@ class Cmd(Core.Command):
                     if str(e) != "urllib3 HTTPError [SSL: DECRYPTION_FAILED_OR_BAD_RECORD_MAC] decryption failed or bad record mac (_ssl.c:2508)":
                         raise
                     else:
-                        Core.logging.warning("Network error")
+                        Core.logger.warning("Network error")
 
             inputs = Core.msg_queue.get(0)
             for i in inputs:
@@ -204,7 +213,7 @@ class Cmd(Core.Command):
                 message += confirmation
                 sent.edit_text(message)
                 break
-        Core.logging.info("Command executed")
+        Core.logger.info("Command executed")
         return output
 
 
@@ -215,12 +224,15 @@ class Ip(Core.Command):
     def description(self):
         return 'Get locan and external IP'
 
+    def requirements(self):
+        return ['requests']
+
     def execute(self, update, context):
         import requests
 
         local_ip = self.get_local_ip()
         external_ip = requests.get('https://ident.me').text
-        Core.logging.info(f"IPs: {local_ip} {external_ip}")
+        Core.logger.info(f"IPs: {local_ip} {external_ip}")
         Core.send_message(update, f"Local IP: {local_ip}\nExternal IP: {external_ip}")
 
     @staticmethod
@@ -264,9 +276,9 @@ class Torrent(Core.Command):
                         subprocess.check_output(["transmission-remote", "-a", link], shell=False, stderr=subprocess.STDOUT, text=True)
                     except subprocess.CalledProcessError as e:
                         Core.send_message(update, "Invalid link")
-                        Core.logging.error(f"Invalid link: {link}  -  Error: {e}")
+                        Core.logger.error(f"Invalid link: {link}  -  Error: {e}")
                         sys.exit(1)
-                    Core.logging.info(f"Torrent added: {link}")
+                    Core.logger.info(f"Torrent added: {link}")
 
             message = transmission_url
             output = subprocess.check_output(["transmission-remote", "-l"], text=True).split("\n")
@@ -275,7 +287,7 @@ class Torrent(Core.Command):
             for i in range(1, len(output) - 2):
                 if output[i].split()[1] == "100%":
                     subprocess.check_output(["transmission-remote", "-t", output[i].split()[0].split("*")[0], "-r"])
-                    Core.logging.info(f"Torrent completed: {output[i][70:]}")
+                    Core.logger.info(f"Torrent completed: {output[i][70:]}")
                     Core.send_message(update, f"Torrent completed: {output[i][70:]}")
                 else:
                     message += "\n▶" + output[i][8:11] + output[i][13:32] + output[i][70:]
@@ -293,7 +305,7 @@ class Torrent(Core.Command):
             else:
                 time.sleep(3)
         sent.edit_text("All torrents downloaded")
-        Core.logging.info("All torrents downloaded")
+        Core.logger.info("All torrents downloaded")
 
 
 class Download(Core.Command):
@@ -302,6 +314,9 @@ class Download(Core.Command):
 
     def description(self):
         return 'Download a file'
+
+    def requirements(self):
+        return ['requests']
 
     def execute(self, update, context):
         args = Core.join_args(update).split()
@@ -325,12 +340,12 @@ class Download(Core.Command):
         import os
         import sys
 
-        Core.logging.info(f"Download requested: {link}")
+        Core.logger.info(f"Download requested: {link}")
         try:
             r = requests.get(link, stream=True)
         except requests.exceptions.RequestException as e:
             Core.send_message(update, "Invalid link")
-            Core.logging.error(f"Invalid link: {link}  -  Error: {e}")
+            Core.logger.error(f"Invalid link: {link}  -  Error: {e}")
             sys.exit(1)
         try:
             name = re.findall("filename=(.+)", r.headers["content-disposition"])[0]
@@ -343,7 +358,7 @@ class Download(Core.Command):
             file_size = -1
         downloaded_bites = 0
 
-        Core.logging.info(f"Starting download: {name}")
+        Core.logger.info(f"Starting download: {name}")
         sent = Core.send_message(update, f"Starting download: {name}")
         last_message = ""
 
@@ -368,7 +383,7 @@ class Download(Core.Command):
                     except Core.telegram.error.TimedOut:
                         pass
                 last_message = message
-        Core.logging.info(f"Finished download: {name}")
+        Core.logger.info(f"Finished download: {name}")
         Core.send_message(update, f"Finished download: {name}")
 
 
@@ -394,7 +409,7 @@ class Lock(Core.Command):
         elif sys.platform == "win32":
             subprocess.check_output("rundll32.exe user32.dll,LockWorkStation", shell=True)
         Core.send_message(update, f"{getpass.getuser()}'s screen locked")
-        Core.logging.info("Screen locked")
+        Core.logger.info("Screen locked")
 
 
 class Logout(Core.Command):
@@ -414,7 +429,7 @@ class Logout(Core.Command):
         if not args:
             args = "0"
         time.sleep(int(args))
-        Core.logging.info('Logging out current user')
+        Core.logger.info('Logging out current user')
         Core.send_message(update, f"{getpass.getuser()}: log out")
         if sys.platform == "linux":
             subprocess.check_output(["loginctl", "terminate-session"])
@@ -438,7 +453,7 @@ class Suspend(Core.Command):
         if not args:
             args = "0"
         time.sleep(int(args))
-        Core.logging.info("Suspending system")
+        Core.logger.info("Suspending system")
         Core.send_message(update, "Suspending system")
         if sys.platform == "linux":
             subprocess.check_output(["systemctl", "suspend"])
@@ -462,7 +477,7 @@ class Hibernate(Core.Command):
         if not args:
             args = "0"
         time.sleep(int(args))
-        Core.logging.info("Hibernating system")
+        Core.logger.info("Hibernating system")
         Core.send_message(update, "Hibernating system")
         if sys.platform == "linux":
             subprocess.check_output(["systemctl", "hibernate"])
@@ -533,14 +548,14 @@ class Volume(Core.Command):
                 subprocess.check_output(["pulseaudio-ctl", "mute"])
             elif sys.platform == "win32":
                 subprocess.check_output("./nircmdc.exe mutesysvolume 2", shell=True)
-            Core.logging.info("Volume mute toggled")
+            Core.logger.info("Volume mute toggled")
             Core.send_message(update, "Volume mute toggled")
         elif args.isdigit():
             if sys.platform == "linux":
                 subprocess.check_output(["pulseaudio-ctl", "set", args])
             elif sys.platform == "win32":
                 subprocess.check_output("./nircmdc.exe changesysvolume " + str(int(int(args) / 100 * 65535)), shell=True)
-            Core.logging.info(f"Volume set to {args}")
+            Core.logger.info(f"Volume set to {args}")
             Core.send_message(update, f"Volume set to {args}")
 
 
@@ -551,26 +566,23 @@ class MsgBox(Core.Command):
     def description(self):
         return 'Display a messagebox'
 
-    def execute(self, update, context):
-        import tkinter
-        root = tkinter.Tk()
-        root.withdraw()
+    def requirements(self):
+        return ['PyMsgBox']
 
-        from tkinter import messagebox
-        import Xlib
+    def execute(self, update, context):  # TODO when X not connected
+        import pymsgbox
+        import _tkinter
 
         args = Core.join_args(update)
-        Core.logging.info("MessageBox showed")
+        Core.logger.info("MessageBox showed")
         Core.send_message(update, "MessageBox showed")
         try:
-            import pyautogui
-            messagebox.showinfo(message=args)
-            root.update()
-
-        except (KeyError, Xlib.error.DisplayConnectionError):
-            print(args)
-        Core.logging.info("MessageBox accepted")
-        Core.send_message(update, "MessageBox accepted")
+            pymsgbox.alert(text=args)
+            Core.logger.info("MessageBox accepted")
+            Core.send_message(update, "MessageBox accepted")
+        except _tkinter.TclError:
+            Core.logger.info("Display not connected. Msgbox unavalaible")
+            Core.send_message(update, "Display not connected. Msgbox unavalaible")
 
 
 commands = [Screen(), Torrent(), Keyboard(), Mouse(), Cmd(), Ip(), Download(), Lock(), Logout(), Suspend(), Hibernate(), Reboot(), Shutdown(), Volume(), MsgBox()]

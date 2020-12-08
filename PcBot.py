@@ -8,6 +8,7 @@ import sys
 from io import StringIO, BytesIO
 from time import sleep
 import json
+import pkg_resources
 
 import telegram
 import urllib3
@@ -43,6 +44,22 @@ def block_until_connected():
             sleep(3)
     sock.close()
     logger.info("Connection established")
+
+
+def check_requirements(requirements):
+    unsatisfied_requirements = set()
+    if isinstance(requirements, str):
+        try:
+            pkg_resources.require(requirements)
+        except (pkg_resources.DistributionNotFound, pkg_resources.VersionConflict) as e:
+            unsatisfied_requirements.add(str(e.req))
+    else:
+        for r in requirements:
+            try:
+                pkg_resources.require(r)
+            except (pkg_resources.DistributionNotFound, pkg_resources.VersionConflict) as e:
+                unsatisfied_requirements.add(str(e.req))
+    return unsatisfied_requirements
 
 
 # def restart(update: telegram.Update, context: telegram.ext.CallbackContext):
@@ -276,16 +293,32 @@ if __name__ == '__main__':
     debug = False
 
     import commands
-    cmds = name_to_command([Status(), DynamicCommands(), *commands.commands, Start(), Commands(), Logs(), Reload()])
+
+    unsatisfied_req = set()
+    for c in commands.commands:
+        unsatisfied_req.update(check_requirements(c.requirements()))
+    if unsatisfied_req:
+        unsatisfied_req_str = "' '".join(unsatisfied_req)
+        logger.warning(f"Unsatisfied commands requirement(s) detected: '{unsatisfied_req_str}'")
+
+    cmds = name_to_command([Status(), DynamicCommands(), *commands.commands, Start(), Commands(), Logs(), Reload(), Stop()])
 
     try:
         import dynamiccommands
         dynamiccmds = dynamiccommands.dynamiccmds
     except ModuleNotFoundError:
         dynamiccmds = []
+
+    unsatisfied_req_dyn = set()
+    for d in dynamiccmds:
+        unsatisfied_req_dyn.update(check_requirements(d.requirements()))
+    if unsatisfied_req_dyn:
+        unsatisfied_req_dyn_str = "' '".join(unsatisfied_req_dyn)
+        logger.warning(f"Unsatisfied dynamic commands requirement(s) detected: '{unsatisfied_req_dyn_str}'")
+
     dynamiccmds = name_to_command(dynamiccmds)
 
-    updater = Updater(token=config['bot_token'], use_context=True,)
+    updater = Updater(token=config['bot_token'], use_context=True)
     dispatcher = updater.dispatcher
     Core.t_bot = telegram.Bot(token=config['bot_token'])
 
@@ -311,7 +344,7 @@ if __name__ == '__main__':
 
     for c_id in config['chat_ids']:
         Start().execute(chat_id=c_id)
-    logger.info(f"Logs file:{logs_filename}")
+    logger.info(f"Logs file: {logs_filename}")
     logger.info("Bot started")
 
     while True:
@@ -323,5 +356,8 @@ if __name__ == '__main__':
             pass
         except (urllib3.exceptions.HTTPError, telegram.error.NetworkError):
             block_until_connected()
+        except KeyboardInterrupt:
+            import signal
+            os.kill(os.getpid(), signal.SIGTERM)
         except Exception as e:
             logger.critical(f"Exception not handled in main loop: {e.__repr__()}\n{''.join(traceback.format_tb(e.__traceback__))}")

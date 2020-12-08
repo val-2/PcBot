@@ -10,6 +10,9 @@ class Command:
     def description(self):
         raise NotImplementedError
 
+    def requirements(self):
+        return []
+
     def execute(self, update: telegram.Update, context: telegram.ext.CallbackContext):
         raise NotImplementedError
 
@@ -21,7 +24,9 @@ class DynamicCommand:
     def description(self):
         raise NotImplementedError
 
-    @staticmethod
+    def requirements(self):
+        return []
+
     def can_showup(self):
         return True
 
@@ -37,13 +42,13 @@ def send_message(update: telegram.Update, text, parse_mode=None, disable_web_pag
     while True:
         try:
             sent = update.message.bot.send_message(update.message.chat_id, text, parse_mode, disable_web_page_preview, disable_notification, reply_to_message_id, reply_markup, timeout, **kwargs)
-            logging.debug(f'Message "{text}" sent to {update.message.chat.first_name}')
+            logger.debug(f'Message "{text}" sent to {update.message.chat.first_name}')
             break
         except telegram.error.NetworkError as e:
             if str(e) != "urllib3 HTTPError [SSL: DECRYPTION_FAILED_OR_BAD_RECORD_MAC] decryption failed or bad record mac (_ssl.c:2508)":
                 raise
             else:
-                logging.warning(f'Network error while sending message "{text}" to {update.message.chat.first_name}. Retrying...')
+                logger.warning(f'Network error while sending message "{text}" to {update.message.chat.first_name}. Retrying...')
     return sent
 
 
@@ -51,3 +56,4 @@ t_bot: telegram.Bot = None
 msg_queue: async_streamer.AsyncWriter = None
 home: str = None
 media: str = None
+logger = logging.getLogger(__name__)
