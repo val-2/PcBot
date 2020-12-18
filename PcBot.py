@@ -1,25 +1,27 @@
 #!/home/val/venv/bin/python
 import datetime
 import getpass
+import json
 import logging
 import os.path
+import pathlib
 import socket
 import sys
+import traceback
 from io import StringIO, BytesIO
 from time import sleep
-import json
-import pkg_resources
 
+import async_streamer
+import interceptor
+import pkg_resources
 import telegram
 import urllib3
-from interceptor import *
 from telegram.ext import Updater, Filters, CommandHandler, MessageHandler
-import pathlib
-import traceback
-# import pystray  # TODO systray
 
 import PcBotCore as Core
-from async_streamer import *
+
+
+# import pystray  # TODO systray
 
 
 def name_to_command(c):
@@ -151,7 +153,6 @@ class Stop(Core.Command):
         return 'Stop bot execution'
 
     def execute(self, update, context):
-        logger.info('Stopping bot by user command')
         Core.send_message(update, 'Stopping bot...')
         os._exit(1)
 
@@ -182,14 +183,13 @@ def handle_commands(update: telegram.Update, context: telegram.ext.CallbackConte
             try:
                 cmds[command_str].execute(update, context)
             except Exception as e:
-                Core.send_message(update, f"Calling command {command_str} threw {e.__repr__()}")
+                Core.send_message(update, f"Calling command {command_str} threw {e.__repr__()}", log_level=10)
                 logger.error(f"Calling command {command_str} threw {e.__repr__()}\n{''.join(traceback.format_tb(e.__traceback__))}")
         else:
-            logger.warning(f"Command {message} doesn't exist")
-            Core.send_message(update, f"Command {message} doesn't exist")
+            Core.send_message(update, f"Command {message} doesn't exist", log_level=logging.WARNING)
     else:
         logger.critical(update)
-        Core.send_message(update, "SOS\n" + str(update))
+        Core.send_message(update, "SOS\n" + str(update), log_level=logging.CRITICAL)
 
 
 def handle_text_dynamiccmds(update: telegram.Update, context: telegram.ext.CallbackContext):
@@ -204,11 +204,10 @@ def handle_text_dynamiccmds(update: telegram.Update, context: telegram.ext.Callb
                     try:
                         dynamiccmds[command_str].execute(update, context)
                     except Exception as e:
-                        Core.send_message(update, f"Calling dynamic command {command_str} threw {e.__repr__()}")
+                        Core.send_message(update, f"Calling dynamic command {command_str} threw {e.__repr__()}", log_level=10)
                         logger.error(f"Calling dynamic command {command_str} threw {e.__repr__()}\n{''.join(traceback.format_tb(e.__traceback__))}")
                 else:
-                    Core.send_message(update, f"The dynamic command {command_str} cannot be executed")
-                    logger.warning(f"The dynamic command {command_str} cannot be executed")
+                    Core.send_message(update, f"The dynamic command {command_str} cannot be executed")  # TODO specify sender
             else:
                 logger.info(f"Unknown dynamic command: {message}")
                 Core.send_message(update, f"Unknown dynamic command: {message}")
@@ -251,10 +250,10 @@ def handle_errors(update: telegram.Update, context: telegram.ext.CallbackContext
 
 
 if __name__ == '__main__':
-    home_directories = {'win32': f'{pathlib.Path.home()}/.pcbot', 'linux': f'{pathlib.Path.home()}/.local/share/pcbot'}
-    config_files = {'win32': f'{pathlib.Path.home()}/.pcbot/config.json', 'linux': f'{pathlib.Path.home()}/.config/pcbot/config.json'}
+    home_directories = {'win32': os.path.join(pathlib.Path.home(), 'AppData', 'Local', 'pcbot'), 'linux': os.path.join(pathlib.Path.home(), '.local', 'share' 'pcbot')}
+    config_files = {'win32': os.path.join(pathlib.Path.home(), 'AppData', 'Local', 'pcbot', 'config.json'), 'linux': os.path.join(pathlib.Path.home(), '.config', 'pcbot', 'config.json')}
 
-    for config_file in ['./config.json', config_files[sys.platform]]:
+    for config_file in [config_files[sys.platform]]:
         if os.path.exists(config_file):
             config = json.load(open(config_file))
             break
@@ -271,7 +270,7 @@ if __name__ == '__main__':
     except FileExistsError:
         pass
 
-    logs_filename = f'{Core.home}/logs.txt'
+    logs_filename = os.path.join(Core.home, 'logs.txt')
     open(logs_filename, 'a').close()
     with open(logs_filename, 'r+') as f:
         data = f.readlines()
@@ -280,8 +279,8 @@ if __name__ == '__main__':
         f.truncate()
 
     stds = StringIO()
-    sys.stdout = Interceptor([sys.stdout, stds, open(logs_filename, 'a', encoding='UTF-8')])
-    sys.stderr = Interceptor([sys.stderr, stds, open(logs_filename, 'a', encoding='UTF-8')])
+    sys.stdout = interceptor.Interceptor([sys.stdout, stds, open(logs_filename, 'a', encoding='UTF-8')])
+    sys.stderr = interceptor.Interceptor([sys.stderr, stds, open(logs_filename, 'a', encoding='UTF-8')])
 
     log_date_format = '%Y-%m-%d %H:%M:%S'
     log_format = f'%(asctime)s {sys.platform} {getpass.getuser()} %(levelname)s %(message)s'
@@ -322,7 +321,7 @@ if __name__ == '__main__':
     dispatcher = updater.dispatcher
     Core.t_bot = telegram.Bot(token=config['bot_token'])
 
-    Core.msg_queue = AsyncWriter()
+    Core.msg_queue = async_streamer.AsyncWriter()
 
     dispatcher.add_handler(CommandHandler(cmds, handle_commands))
 
