@@ -12,7 +12,7 @@ class Destiny(Core.DynamicCommand):
         import sys
         return ['pywinauto', 'pyautogui'] if sys.platform == 'win32' else []
 
-    def can_showup(self):
+    def can_be_executed(self):
         import sys
         return sys.platform == 'win32'
 
@@ -45,7 +45,7 @@ class RefindLinux(Core.DynamicCommand):  # TODO unified refind command
     def description(self):
         return 'Make refind boot Linux on next reboot'
 
-    def can_showup(self):
+    def can_be_executed(self):
         return True
 
     def execute(self, update, context):
@@ -73,7 +73,7 @@ class RefindWindows(Core.DynamicCommand):
     def description(self):
         return 'Make refind boot Windows on next reboot'
 
-    def can_showup(self):
+    def can_be_executed(self):
         return True
 
     def execute(self, update, context):
@@ -97,7 +97,7 @@ class Test(Core.DynamicCommand):
     def description(self):
         return 'Just a test'
 
-    def can_showup(self):
+    def can_be_executed(self):
         return True
 
     def execute(self, update, context):

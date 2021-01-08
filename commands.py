@@ -553,7 +553,7 @@ class MsgBox(Core.Command):
     def requirements(self):
         return ['PyMsgBox']
 
-    def execute(self, update, context):  # TODO when X not connected
+    def execute(self, update, context):
         import pymsgbox
         import _tkinter
 
