@@ -116,7 +116,7 @@ class Mouse(Core.Command):  # TODO when multiplier too small too many pointers
         while True:
             if not (message := Core.msg_queue.get(timeout=3, reset_before_start=False, reset_after_return=True)):
                 self.send_grid(update, context)
-                Core.msg_queue.get(reset_before_start=False)
+                Core.msg_queue.get(reset_before_start=False, reset_after_return=False)
                 continue
             if message[0] in actions:
                 actions[message[0]]()

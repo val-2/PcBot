@@ -38,12 +38,12 @@ class Destiny(Core.DynamicCommand):
         Core.send_message(update, "Destiny 2 started")
 
 
-class RefindLinux(Core.DynamicCommand):  # TODO unified refind command
+class Refind(Core.DynamicCommand):
     def name(self):
-        return 'refindlinux'
+        return 'refind'
 
     def description(self):
-        return 'Make refind boot Linux on next reboot'
+        return 'Change OS '
 
     def can_be_executed(self):
         return True
@@ -52,6 +52,12 @@ class RefindLinux(Core.DynamicCommand):  # TODO unified refind command
         import subprocess
         import sys
 
+        oses = {'Linux': '"Boot @\\boot\\vmlinuz-linux-zen from Arch"', 'Windows': '"Boot Microsoft EFI boot from EFI system partition"'}
+        reply_markup = Core.telegram.ReplyKeyboardMarkup([list(oses.keys())])
+
+        Core.send_message(update, 'Choose or write the wanted OS', reply_markup=reply_markup)
+        message = Core.msg_queue.get(timeout=None, reset_before_start=False, reset_after_return=True)[0]
+        os_str = oses.get(message, message)
         refindscript = {'linux': ['refind-next-reboot'], 'win32': ['powershell', 'refind-next-reboot.ps1']}
 
         # import os
@@ -59,50 +65,16 @@ class RefindLinux(Core.DynamicCommand):  # TODO unified refind command
         # value = [i for i in sorted(os.listdir(paths[sys.platform]), key=lambda x: os.path.getmtime(f'{paths[sys.platform]}{x}')) if i[:7] == 'vmlinuz'][-1]
         # value = f'"Boot boot\\{value} from Manjaro"'
 
-        if subprocess.check_output([*refindscript[sys.platform], 'set', f'"Boot @\\boot\\vmlinuz-linux-zen from Arch"'], text=True) == 'ok\n':
-            Core.send_message(update, f'Linux set for next reboot. Use /reboot to use it immediately')
+        try:
+            subprocess.check_output([*refindscript[sys.platform], 'set', os_str], text=True)
+        except subprocess.CalledProcessError:
+            Core.send_message(update, 'Error while executing script', log_level=40, reply_markup=Core.telegram.ReplyKeyboardRemove())
+        except FileNotFoundError:
+            Core.send_message(update, 'Script not found', log_level=40, reply_markup=Core.telegram.ReplyKeyboardRemove())
+        except Exception as e:
+            Core.send_message(update, f'Generic error: {repr(e)}', log_level=40, reply_markup=Core.telegram.ReplyKeyboardRemove())
         else:
-            Core.send_message(update, 'Failed to change OS for next reboot')
-            Core.logging.error('Failed to change OS for next reboot')
+            Core.send_message(update, f'OS set for next reboot. Use /reboot to use it immediately', reply_markup=Core.telegram.ReplyKeyboardRemove())
 
 
-class RefindWindows(Core.DynamicCommand):
-    def name(self):
-        return 'refindwindows'
-
-    def description(self):
-        return 'Make refind boot Windows on next reboot'
-
-    def can_be_executed(self):
-        return True
-
-    def execute(self, update, context):
-        import subprocess
-        import sys
-
-        refindscript = {'linux': ['refind-next-reboot'], 'win32': ['powershell', 'refind-next-reboot.ps1']}
-
-        subprocess.check_output([*refindscript[sys.platform], 'set', 'Boot Microsoft EFI boot from EFI system partition'])
-        if subprocess.check_output([*refindscript[sys.platform], 'set', 'Boot Microsoft EFI boot from EFI system partition'], text=True) == 'ok\n':
-            Core.send_message(update, f'Windows set for next reboot. Use /reboot to use it immediately')
-        else:
-            Core.send_message(update, 'Failed to change OS for next reboot')
-            Core.logging.error('Failed to change OS for next reboot')
-
-
-class Test(Core.DynamicCommand):
-    def name(self):
-        return 'test'
-
-    def description(self):
-        return 'Just a test'
-
-    def can_be_executed(self):
-        return True
-
-    def execute(self, update, context):
-        import sys
-        sys.exit(1)
-
-
-dynamiccmds = [Destiny(), RefindLinux(), RefindWindows(), Test()]
+dynamiccmds = [Destiny(), Refind()]

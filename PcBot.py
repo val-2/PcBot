@@ -18,7 +18,7 @@ import pystray
 import telegram
 import urllib3
 from PIL import Image, ImageDraw
-from telegram.ext import Updater, Filters, CommandHandler, MessageHandler
+from telegram.ext import Updater, Filters, CommandHandler, MessageHandler, CallbackQueryHandler
 
 import PcBotCore as Core
 import PcBotConfig
@@ -39,11 +39,14 @@ def block_until_connected():
         try:
             sock.connect(("api.telegram.org", 443))
             break
-        except socket.error:
+        except socket.error as e:
             if not logged:
-                logger.warning("Connection lost. Waiting...")
+                logger.warning(f"Connection lost. Exception:\n{traceback_exception(e)}")
                 logged = True
+            else:
+                logger.log(15, f"Connection lost. Exception:\n{traceback_exception(e)}")
             time.sleep(3)
+    sock.shutdown(socket.SHUT_RDWR)
     sock.close()
     logger.info("Connection established")
 
@@ -72,7 +75,7 @@ def custom_logs():
     sys.stderr = interceptor.Interceptor([sys.stderr, stds, open(logs_fn, 'a', encoding='UTF-8')])
 
     log_date_format = '%Y-%m-%d %H:%M:%S'
-    log_format = f'%(asctime)s {sys.platform} {getpass.getuser()} %(levelname)s %(module)s:%(lineno)d %(message)s '
+    log_format = f'%(asctime)s {sys.platform} {getpass.getuser()} %(levelname)s %(module)s:%(lineno)d %(message)s'
 
     # noinspection PyTypeChecker
     logging.basicConfig(level=20, datefmt=log_date_format, format=log_format, stream=sys.stdout)
@@ -80,6 +83,32 @@ def custom_logs():
 
 def traceback_exception(e):
     return f'{"".join(traceback.format_tb(e.__traceback__))}{repr(e)}'
+
+
+def handle_critical_error(exc_value):
+    logging.critical(f'Exception in PcBot main thread:\n{"".join(traceback_exception(exc_value))}')
+
+    def critical_setup(icon):
+        icon.visible = True
+        icon.notify(f"Exception in PcBot main thread: {repr(exc_value)}")
+
+    def _restart(icon):
+        handle_critical_error.restart_program = True
+        icon.stop()
+
+    handle_critical_error.restart_program = False
+
+    icon = pystray.Icon(f'PcBotException_{time.time()}')
+    icon.menu = pystray.Menu(pystray.MenuItem('Restart', _restart), pystray.MenuItem('Exit', icon.stop))
+    icon.icon = create_image('black')
+    icon.run(setup=critical_setup)
+    return handle_critical_error.restart_program
+
+
+def toggle_debug():
+    global debug
+    debug = not debug
+    logging.basicConfig(level=20-debug*5)
 
 
 def check_requirements(requirements):
@@ -125,22 +154,6 @@ def check_chat_id(update: telegram.Update):
         return False
     else:
         return True
-
-
-def handle_critical_error(exc_type, exc_value, exc_traceback):
-    if issubclass(exc_type, KeyboardInterrupt):
-        sys.__excepthook__(exc_type, exc_value, exc_traceback)
-        return
-    logging.critical(f'Exception in PcBot main thread:\n{"".join(traceback.format_tb(exc_traceback))}{repr(exc_value)}')
-
-    def critical_setup(icon):
-        icon.visible = True
-        icon.notify(f"Exception in PcBot main thread: {repr(exc_value)}")
-
-    icon = pystray.Icon(f'PcBotException_{time.time()}')
-    icon.menu = pystray.Menu(pystray.MenuItem('Exit', icon.stop))
-    icon.icon = create_image('black')
-    icon.run(setup=critical_setup)
 
 
 # Commands
@@ -236,7 +249,7 @@ class Reload(Core.Command):
         del sys.modules['commands']
         import commands
         global cmds
-        cmds = name_to_command([Status(), DynamicCommands(), *commands.commands, Start(), Commands(), Logs(), Reload()])
+        cmds = get_cmds()
         dispatcher.handlers[0][0] = CommandHandler(cmds, handle_commands)
 
         Core.send_message(update, "Commands reloaded")
@@ -347,21 +360,27 @@ def create_image(fill='limegreen'):
     dc.rectangle((x0_stand, y0_stand, x-x0_stand, y0_base), fill='lightgray')  # stand
     dc.rectangle((0, 0, x, y0_stand), fill='white')  # frame
     dc.rectangle((x0_display, y0_display, x-x0_display, y0_stand-y0_display), fill=fill)  # display
-    final_image.paste(image, (0, (x-y)//2))
+    final_image.paste(image, (max(0, (y-x)//2), max(0, (x-y)//2)))
     return final_image
 
 
 if __name__ == '__main__':
-    sys.excepthook = handle_critical_error
     custom_logs()
-    while runpy.run_path(__file__).get('restart_program', False):
-        logging.info('Restarting program')
+    while True:
+        try:
+            restart_program = runpy.run_path(__file__).get('restart_program', False)
+        except Exception as e:
+            restart_program = handle_critical_error(e)
+        if restart_program:
+            logging.info('Program thread exited. Restarting...')
+        else:
+            break
     logging.info('Main thread exited')
 else:
+    debug = False
+
     local_directory = {'win32': os.path.join(pathlib.Path.home(), 'AppData', 'Local', 'pcbot'), 'linux': os.path.join(pathlib.Path.home(), '.local', 'share', 'pcbot')}
-
     config = PcBotConfig.get_config()
-
     Core.home = local_directory[sys.platform]
     Core.media = f'{Core.home}/Media'
     try:
@@ -372,7 +391,8 @@ else:
     logs_filename = os.path.join(Core.home, 'logs.txt')
     logger = logging.getLogger(__name__)
 
-    debug = False
+    if __name__ != '<run_path>':
+        logger.critical("Program not started in the standard way")
 
     import commands
 
@@ -383,7 +403,10 @@ else:
         unsatisfied_req_str = "' '".join(unsatisfied_req)
         logger.warning(f"Unsatisfied commands requirement(s): '{unsatisfied_req_str}'")
 
-    cmds = name_to_command([Status(), DynamicCommands(), *commands.commands, Start(), Commands(), Logs(), Reload(), RestartBot(), Stop()])
+    def get_cmds():
+        return name_to_command([Status(), DynamicCommands(), *commands.commands, Start(), Commands(), Logs(), Reload(), RestartBot(), Stop()])
+
+    cmds = get_cmds()
 
     try:
         import dynamiccommands
@@ -401,7 +424,7 @@ else:
     dynamiccmds = name_to_command(dynamiccmds)
 
     icon = pystray.Icon(f'PcBot_{time.time()}')
-    icon.menu = pystray.Menu(pystray.MenuItem('Restart', _restart_bot), pystray.MenuItem('Exit', _stop_bot))
+    icon.menu = pystray.Menu(pystray.MenuItem('Debug', toggle_debug), pystray.MenuItem('Restart', _restart_bot), pystray.MenuItem('Exit', _stop_bot))
 
     updater = Updater(token=config['bot_token'], use_context=True)
     dispatcher = updater.dispatcher
@@ -409,12 +432,12 @@ else:
 
     Core.msg_queue = async_streamer.AsyncWriter()
 
-    dispatcher.add_handler(CommandHandler(cmds, handle_commands))
-
+    dispatcher.add_handler(CommandHandler(cmds, handle_commands, run_async=True))
     dispatcher.add_handler(MessageHandler(Filters.text, handle_text_dynamiccmds, run_async=True))
     dispatcher.add_handler(MessageHandler(Filters.photo, handle_photo, run_async=True))
     dispatcher.add_handler(MessageHandler(Filters.document, handle_file, run_async=True))
     dispatcher.add_handler(MessageHandler(Filters.entity(telegram.MessageEntity.BOT_COMMAND), handle_commands, run_async=True))
+    # TODO dispatcher.add_handler(CallbackQueryHandler(handle_buttons, run_async=True))
     dispatcher.add_handler(MessageHandler(Filters.all, handle_all_the_rest, run_async=True))
     dispatcher.add_error_handler(handle_errors)
 
@@ -445,33 +468,24 @@ else:
             except telegram.error.TimedOut:
                 logging.debug('Sending typing chat action failed')
             except (urllib3.exceptions.HTTPError, telegram.error.NetworkError):
-                if icon:
-                    icon.icon = create_image('red')
+                icon.icon = create_image('red')
                 block_until_connected()
-                if icon:
-                    icon.icon = create_image()
+                icon.icon = create_image()
             except Exception as e:
                 logger.critical(f"Exception not handled in icon loop:\n{traceback_exception(e)}")
+                icon.notify(f"Exception not handled in icon loop: {repr(e)}")
         icon.visible = False
         stop_loop = False
         logger.info('Icon loop ended')
 
-    for _ in range(3):
-        try:
-            icon.icon = create_image()
-            icon.run(setup=icon_loop)
-            break
-        except Exception as e:
-            for c in config['chat_ids']:
-                Core.t_bot.send_message(c, f'Icon loop exited with exception {repr(e)}')
-            logger.critical(f'Icon loop exited with exception:\n{traceback_exception(e)}')
-            icon.icon = create_image('red')
-            time.sleep(5)
+    icon.icon = create_image()
+    icon.run(setup=icon_loop)
 
-    logger.info('Stopping icon loop')
-    try:
-        stop_loop = True
-        icon.stop()
-    except Exception as e:
-        logger.error(f'Exception while stopping icon:\n{traceback_exception(e)}')
+    if icon._running:
+        logger.info('Stopping icon loop')
+        try:
+            stop_loop = True
+            icon.stop()
+        except Exception as e:
+            logger.error(f'Exception while stopping icon:\n{traceback_exception(e)}')
 
