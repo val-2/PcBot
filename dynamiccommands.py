@@ -52,13 +52,13 @@ class Refind(Core.DynamicCommand):
         import subprocess
         import sys
 
-        oses = {'Linux': '"Boot @\\boot\\vmlinuz-linux-zen from Arch"', 'Windows': '"Boot Microsoft EFI boot from EFI system partition"'}
+        oses = {'Linux': 'Boot @\\boot\\vmlinuz-linux-zen from Arch', 'Windows': 'Boot Microsoft EFI boot from EFI system partition'}
+        refindscript = {'linux': ['refind-next-reboot'], 'win32': ['powershell', 'refind-next-reboot.ps1']}
         reply_markup = Core.telegram.ReplyKeyboardMarkup([list(oses.keys())])
 
-        Core.send_message(update, 'Choose or write the wanted OS', reply_markup=reply_markup)
+        Core.send_message(update, f"Choose or write the wanted OS\nCurrent string:\n{subprocess.check_output([*refindscript[sys.platform], 'get'], text=True)}", reply_markup=reply_markup)
         message = Core.msg_queue.get(timeout=None, reset_before_start=False, reset_after_return=True)[0]
         os_str = oses.get(message, message)
-        refindscript = {'linux': ['refind-next-reboot'], 'win32': ['powershell', 'refind-next-reboot.ps1']}
 
         # import os
         # paths = {'linux': '/boot/', 'win32': 'M:/boot/'}

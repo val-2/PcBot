@@ -1,6 +1,9 @@
 import logging
-import async_streamer
+
 import telegram.ext
+import queue
+import threading
+import time
 
 
 class Command:
@@ -34,6 +37,40 @@ class DynamicCommand:
         raise NotImplementedError
 
 
+class MessageQueue(queue.Queue):
+    def __init__(self):
+        super().__init__()
+        self._items = []
+        self.lock = threading.Lock()
+
+    def get(self, timeout=None, reset_before_start=False, reset_after_return=True):  # if timeout is None, blocks
+        if reset_before_start:
+            self._items = []
+
+        start = time.time()
+
+        while True:
+            try:
+                self._items.append(super().get(block=len(self._items) == 0, timeout=self._get_timeout(timeout, start)))
+                if timeout is None:
+                    raise queue.Empty
+            except queue.Empty:
+                tmp_items = tuple(self._items)
+                if reset_after_return:
+                    self._items = []
+                return tmp_items
+
+    @staticmethod
+    def _get_timeout(timeout, start):
+        if not timeout:
+            return timeout
+        else:
+            remaining = start + timeout - time.time()
+            if remaining <= 0.0:
+                raise queue.Empty
+            return remaining
+
+
 def join_args(update):
     return " ".join(update.message["text"].split(" ")[1:])
 
@@ -55,8 +92,8 @@ def send_message(update: telegram.Update or str, text, log_level=logging.INFO, p
                 raise
 
 
+msg_queue = MessageQueue()
 t_bot: telegram.Bot = None
-msg_queue: async_streamer.AsyncWriter = None
 home: str = None
 media: str = None
 logger = logging.getLogger(__name__)

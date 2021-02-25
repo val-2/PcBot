@@ -11,14 +11,13 @@ import time
 import traceback
 from io import StringIO, BytesIO
 
-import async_streamer
 import interceptor
 import pkg_resources
 import pystray
 import telegram
 import urllib3
 from PIL import Image, ImageDraw
-from telegram.ext import Updater, Filters, CommandHandler, MessageHandler, CallbackQueryHandler
+from telegram.ext import Updater, Filters, CommandHandler, MessageHandler  # , CallbackQueryHandler
 
 import PcBotCore as Core
 import PcBotConfig
@@ -98,7 +97,6 @@ def handle_critical_error(exc_value):
 
     handle_critical_error.restart_program = False
 
-    icon = pystray.Icon(f'PcBotException_{time.time()}')
     icon.menu = pystray.Menu(pystray.MenuItem('Restart', _restart), pystray.MenuItem('Exit', icon.stop))
     icon.icon = create_image('black')
     icon.run(setup=critical_setup)
@@ -128,13 +126,12 @@ def check_requirements(requirements):
 
 
 def _stop_bot():
-    global stop_loop
     logger.info('Stopping bot updater')
-    updater.stop()
+    updater.stop()  # TODO if command still in execution, this will block forever
     logger.info('Bot updater stopped')
     logger.info('Stopping icon loop')
+    global stop_loop
     stop_loop = True
-    icon.stop()
 
 
 def _restart_bot():
@@ -367,8 +364,9 @@ def create_image(fill='limegreen'):
 if __name__ == '__main__':
     custom_logs()
     while True:
+        icon = pystray.Icon(f'PcBot_{time.time()}')
         try:
-            restart_program = runpy.run_path(__file__).get('restart_program', False)
+            restart_program = runpy.run_path(__file__, init_globals={'icon': icon}).get('restart_program', False)
         except Exception as e:
             restart_program = handle_critical_error(e)
         if restart_program:
@@ -423,14 +421,12 @@ else:
 
     dynamiccmds = name_to_command(dynamiccmds)
 
-    icon = pystray.Icon(f'PcBot_{time.time()}')
+    icon: pystray.Icon
     icon.menu = pystray.Menu(pystray.MenuItem('Debug', toggle_debug), pystray.MenuItem('Restart', _restart_bot), pystray.MenuItem('Exit', _stop_bot))
 
     updater = Updater(token=config['bot_token'], use_context=True)
     dispatcher = updater.dispatcher
     Core.t_bot = telegram.Bot(token=config['bot_token'])
-
-    Core.msg_queue = async_streamer.AsyncWriter()
 
     dispatcher.add_handler(CommandHandler(cmds, handle_commands, run_async=True))
     dispatcher.add_handler(MessageHandler(Filters.text, handle_text_dynamiccmds, run_async=True))
@@ -448,8 +444,9 @@ else:
             break
         except telegram.error.NetworkError:
             continue
-    for c_id in config['chat_ids']:
-        Start().execute(chat_id=c_id)
+
+    # for c_id in config['chat_ids']:
+    #     Start().execute(chat_id=c_id)
 
     logger.info(f"Logs file: {logs_filename}")
     logger.info("Bot started")
@@ -476,16 +473,10 @@ else:
                 icon.notify(f"Exception not handled in icon loop: {repr(e)}")
         icon.visible = False
         stop_loop = False
+        icon.stop()
         logger.info('Icon loop ended')
 
     icon.icon = create_image()
     icon.run(setup=icon_loop)
 
-    if icon._running:
-        logger.info('Stopping icon loop')
-        try:
-            stop_loop = True
-            icon.stop()
-        except Exception as e:
-            logger.error(f'Exception while stopping icon:\n{traceback_exception(e)}')
 

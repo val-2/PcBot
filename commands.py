@@ -16,17 +16,18 @@ class Screen(Core.Command):
         import screenmss
         from PIL import Image, ImageDraw
         import io
+        import sys
 
         pyautogui.FAILSAFE = False
 
         args = Core.join_args(update)
-        s = screenmss.screenshot(nparray=False)
+        s = screenmss.screenshot()
         Core.t_bot.send_chat_action(chat_id=update.message.chat_id, action=Core.telegram.ChatAction.UPLOAD_PHOTO)
         if args and not ignore_args:
             lossless = True
         Core.logger.debug("Screenshot taken")
         im = Image.frombytes("RGB", s.size, s.bgra, "raw", "BGRX")
-        if cursor:
+        if cursor and sys.platform != 'win32':  # TODO pyautogui.position fails when pystray is imported on windows
             ImageDraw.ImageDraw(im).polygon(self.pointer_coords(pyautogui.position().x, pyautogui.position().y), fill="white", outline="black")
 
         f = io.BytesIO()
@@ -72,7 +73,7 @@ class Keyboard(Core.Command):
         Core.send_message(update, f'Keys "{args}" written')
 
 
-class Mouse(Core.Command):  # TODO when multiplier too small too many pointers
+class Mouse(Core.Command):
     def name(self):
         return 'mouse'
 
@@ -95,10 +96,10 @@ class Mouse(Core.Command):  # TODO when multiplier too small too many pointers
         self.multiplier = 0.25
 
         def increase():
-            self.multiplier *= 4
+            self.multiplier *= 4 if min(pyautogui.size()) * self.multiplier >= 1 else self.multiplier
 
         def reduce():
-            self.multiplier /= 4
+            self.multiplier /= 4 if min(pyautogui.size()) * self.multiplier >= 1 else self.multiplier
 
         actions = {
             'double click': pyautogui.doubleClick,
@@ -114,8 +115,9 @@ class Mouse(Core.Command):  # TODO when multiplier too small too many pointers
         Core.send_message(update, "Mouse control started", reply_markup=reply_markup)
 
         while True:
-            if not (message := Core.msg_queue.get(timeout=3, reset_before_start=False, reset_after_return=True)):
+            if not (message := Core.msg_queue.get(timeout=3)):
                 self.send_grid(update, context)
+                Core.send_message(update, str(self.multiplier))
                 Core.msg_queue.get(reset_before_start=False, reset_after_return=False)
                 continue
             if message[0] in actions:
@@ -133,19 +135,23 @@ class Mouse(Core.Command):  # TODO when multiplier too small too many pointers
         import screenmss
         from PIL import Image, ImageDraw
         import io
+        import math
 
         pyautogui.FAILSAFE = False
 
-        s = screenmss.screenshot(nparray=False)
+        s = screenmss.screenshot()
         Core.logger.debug("Screenshot taken")
         Core.t_bot.send_chat_action(chat_id=update.message.chat_id, action=Core.telegram.ChatAction.UPLOAD_PHOTO)
         im = Image.frombytes("RGB", s.size, s.bgra, "raw", "BGRX")
 
-        horizontal_pos = [i for i in range(int(pyautogui.position().x % (pyautogui.size()[0] * self.multiplier)), pyautogui.size()[0], int(pyautogui.size()[0] * self.multiplier))]
-        vertical_pos = [i for i in range(int(pyautogui.position().y % (pyautogui.size()[1] * self.multiplier)), pyautogui.size()[1], int(pyautogui.size()[1] * self.multiplier))]
-        for x in horizontal_pos:
-            for y in vertical_pos:
-                ImageDraw.ImageDraw(im, "RGBA").polygon(self.pointer_coords(x, y), fill=(0, 0, 0, 100), outline=(255, 255, 255, 100))
+        if min(pyautogui.size()) * self.multiplier > 17:
+            offset_x = pyautogui.position().x % (pyautogui.size()[0] * self.multiplier)
+            offset_y = pyautogui.position().y % (pyautogui.size()[1] * self.multiplier)
+            horizontal_pos = [offset_x + i * (pyautogui.size()[0] * self.multiplier) for i in range(0, math.ceil((pyautogui.size()[0]-offset_x) / (pyautogui.size()[0] * self.multiplier)))]
+            vertical_pos = [offset_y + i * (pyautogui.size()[1] * self.multiplier) for i in range(0, math.ceil((pyautogui.size()[1]-offset_y) / (pyautogui.size()[1] * self.multiplier)))]
+            for x in horizontal_pos:
+                for y in vertical_pos:
+                    ImageDraw.ImageDraw(im, "RGBA").polygon(self.pointer_coords(x, y), fill=(0, 0, 0, 100), outline=(255, 255, 255, 100))
 
         ImageDraw.ImageDraw(im).polygon(self.pointer_coords(pyautogui.position().x, pyautogui.position().y), fill="white", outline="black")
 
@@ -268,7 +274,7 @@ class Torrent(Core.Command):
                     times = 0
 
                     try:
-                        subprocess.check_output(["transmission-remote", "-a", link], shell=False, stderr=subprocess.STDOUT, text=True)
+                        subprocess.check_output(["transmission-remote", "-a", link], stderr=subprocess.STDOUT, text=True)
                     except subprocess.CalledProcessError as e:
                         Core.send_message(update, f"Invalid link: {link}", log_level=40)
                         sys.exit(1)
@@ -397,7 +403,7 @@ class Lock(Core.Command):
         if sys.platform == "linux":
             subprocess.check_output(["loginctl", "lock-session"])
         elif sys.platform == "win32":
-            subprocess.check_output("rundll32.exe user32.dll,LockWorkStation", shell=True)
+            subprocess.check_output(['rundll32.exe' 'user32.dll,LockWorkStation'])
         Core.send_message(update, f"{getpass.getuser()}'s screen locked")
 
 
@@ -422,7 +428,7 @@ class Logout(Core.Command):
         if sys.platform == "linux":
             subprocess.check_output(["loginctl", "terminate-session"])
         elif sys.platform == "win32":
-            subprocess.check_output(f"shutdown -l -f", shell=True)
+            subprocess.check_output(['shutdown', '-l', '-f'])
 
 
 class Suspend(Core.Command):
@@ -445,7 +451,11 @@ class Suspend(Core.Command):
         if sys.platform == "linux":
             subprocess.check_output(["systemctl", "suspend"])
         elif sys.platform == "win32":
-            subprocess.check_output(f".\\nircmdc.exe standby", shell=True)
+            try:
+                subprocess.check_output(['nircmdc.exe', 'standby'])
+            except FileNotFoundError:
+                Core.send_message(update, 'Warning: this command will hibernate if hibernation is active. Disable hibernation or add nircmdc.exe to path')
+                subprocess.check_output(['rundll32.exe', 'powrprof.dll,SetSuspendState', '0,1,0'])
 
 
 class Hibernate(Core.Command):
@@ -468,7 +478,7 @@ class Hibernate(Core.Command):
         if sys.platform == "linux":
             subprocess.check_output(["systemctl", "hibernate"])
         elif sys.platform == "win32":
-            subprocess.check_output(f"shutdown -h", shell=True)
+            subprocess.check_output(['shutdown', '-h'])
 
 
 class Reboot(Core.Command):
@@ -491,7 +501,7 @@ class Reboot(Core.Command):
             time.sleep(int(args))
             subprocess.check_output(["reboot"])
         elif sys.platform == "win32":
-            subprocess.check_output(f"shutdown -r -f -t {args}", shell=True)
+            subprocess.check_output(['shutdown', '-r', '-f', '-t', args])
 
 
 class Shutdown(Core.Command):
@@ -514,7 +524,7 @@ class Shutdown(Core.Command):
             time.sleep(int(args))
             subprocess.Popen(["poweroff"])
         elif sys.platform == "win32":
-            subprocess.Popen(f"shutdown -s -f -t {args}", shell=True)
+            subprocess.Popen(['shutdown', '-s', '-f', '-t', args])
 
 
 class Volume(Core.Command):
@@ -524,16 +534,20 @@ class Volume(Core.Command):
     def description(self):
         return 'Change volume'
 
+    def requirements(self):
+        return ['pyautogui;platform_system=="Windows"']
+
     def execute(self, update, context):
         import subprocess
         import sys
+        import pyautogui
 
         args = Core.join_args(update)
         if args == "mute":
             if sys.platform == "linux":
                 subprocess.check_output(["pulseaudio-ctl", "mute"])
             elif sys.platform == "win32":
-                subprocess.check_output("./nircmdc.exe mutesysvolume 2", shell=True)
+                pyautogui.press('volumemute')
             Core.send_message(update, "Volume mute toggled")
         elif args.isdigit():
             if sys.platform == "linux":
