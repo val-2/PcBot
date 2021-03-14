@@ -11,7 +11,6 @@ import time
 import traceback
 from io import StringIO, BytesIO
 
-import interceptor
 import pkg_resources
 import pystray
 import telegram
@@ -37,6 +36,7 @@ def block_until_connected():
     while True:
         try:
             sock.connect(("api.telegram.org", 443))
+            logger.info("Connection established")
             break
         except socket.error as e:
             if not logged:
@@ -45,9 +45,29 @@ def block_until_connected():
             else:
                 logger.log(15, f"Connection lost. Exception:\n{traceback_exception(e)}")
             time.sleep(3)
+    logger.info('Shutting down socket')
     sock.shutdown(socket.SHUT_RDWR)
+    logger.info('Closing socket')
     sock.close()
-    logger.info("Connection established")
+
+
+class Interceptor:
+    def __init__(self, intercepted):
+        self.intercepted = intercepted
+
+    def __getattr__(self, item):
+        attr = self.intercepted[0].__getattribute__(item)
+        if hasattr(attr, '__call__'):
+            def func(*args, **kwargs):
+                result = attr(*args, **kwargs)
+                for i in self.intercepted[1:]:
+                    i.__getattribute__(item)(*args, **kwargs)
+                return result
+            return func
+        else:
+            for i in self.intercepted[1:]:
+                i.__getattribute__(item)
+            return attr
 
 
 def custom_logs():
@@ -70,8 +90,8 @@ def custom_logs():
             f.truncate()
 
     stds = StringIO()
-    sys.stdout = interceptor.Interceptor([sys.stdout, stds, open(logs_fn, 'a', encoding='UTF-8')])
-    sys.stderr = interceptor.Interceptor([sys.stderr, stds, open(logs_fn, 'a', encoding='UTF-8')])
+    sys.stdout = Interceptor([sys.stdout, stds, open(logs_fn, 'a', encoding='UTF-8', buffering=1)])
+    sys.stderr = Interceptor([sys.stderr, stds, open(logs_fn, 'a', encoding='UTF-8', buffering=1)])
 
     log_date_format = '%Y-%m-%d %H:%M:%S'
     log_format = f'%(asctime)s {sys.platform} {getpass.getuser()} %(levelname)s %(module)s:%(lineno)d %(message)s'
@@ -107,6 +127,10 @@ def toggle_debug():
     global debug
     debug = not debug
     logging.basicConfig(level=20-debug*5)
+    if debug:
+        logging.info('Debug logging enabled')
+    else:
+        logging.info('Debug logging disabled')
 
 
 def check_requirements(requirements):
@@ -227,7 +251,7 @@ class Logs(Core.Command):
         return 'Get stout and stderr'
 
     def execute(self, update: telegram.Update, context: telegram.ext.CallbackContext):
-        Core.t_bot.send_document(update.message.chat_id, document=BytesIO(sys.stdout.get_std(1).getvalue().encode()), filename='logs.txt')
+        Core.t_bot.send_document(update.message.chat_id, document=BytesIO(sys.stdout.intercepted[1].getvalue().encode()), filename='logs.txt')
 
 
 class Reload(Core.Command):
@@ -244,7 +268,6 @@ class Reload(Core.Command):
         dynamiccmds = name_to_command(dynamiccommands.dynamiccmds)
 
         del sys.modules['commands']
-        import commands
         global cmds
         cmds = get_cmds()
         dispatcher.handlers[0][0] = CommandHandler(cmds, handle_commands)
