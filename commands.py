@@ -27,8 +27,7 @@ class Screen(Core.Command):
             lossless = True
         Core.logger.debug("Screenshot taken")
         im = Image.frombytes("RGB", s.size, s.bgra, "raw", "BGRX")
-        if cursor and sys.platform != 'win32':  # TODO pyautogui.position fails when pystray is imported on windows
-            ImageDraw.ImageDraw(im).polygon(self.pointer_coords(pyautogui.position().x, pyautogui.position().y), fill="white", outline="black")
+        ImageDraw.ImageDraw(im).polygon(self.pointer_coords(pyautogui.position().x, pyautogui.position().y), fill="white", outline="black")
 
         f = io.BytesIO()
         im.save(f, format="png", optimize=True)

@@ -4,22 +4,22 @@ import getpass
 import logging
 import os.path
 import pathlib
-import runpy
 import socket
+import subprocess
 import sys
+import threading
 import time
 import traceback
 from io import StringIO, BytesIO
 
 import pkg_resources
-import pystray
+import rpyc
 import telegram
 import urllib3
-from PIL import Image, ImageDraw
 from telegram.ext import Updater, Filters, CommandHandler, MessageHandler  # , CallbackQueryHandler
 
-import PcBotCore as Core
 import PcBotConfig
+import PcBotCore as Core
 
 
 def name_to_command(c):
@@ -32,7 +32,7 @@ def name_to_command(c):
 def block_until_connected():
     logged = False
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(5)
+    sock.settimeout(10)
     while True:
         try:
             sock.connect(("api.telegram.org", 443))
@@ -44,10 +44,10 @@ def block_until_connected():
                 logged = True
             else:
                 logger.log(15, f"Connection lost. Exception:\n{traceback_exception(e)}")
-            time.sleep(3)
-    logger.info('Shutting down socket')
+            time.sleep(1)
+    logger.log(15, 'Shutting down socket')
     sock.shutdown(socket.SHUT_RDWR)
-    logger.info('Closing socket')
+    logger.log(15, 'Closing socket')
     sock.close()
 
 
@@ -98,39 +98,46 @@ def custom_logs():
 
     # noinspection PyTypeChecker
     logging.basicConfig(level=20, datefmt=log_date_format, format=log_format, stream=sys.stdout)
+    sys.excepthook = handle_critical_error
 
 
 def traceback_exception(e):
     return f'{"".join(traceback.format_tb(e.__traceback__))}{repr(e)}'
 
 
-def handle_critical_error(exc_value):
+def handle_critical_error(exc_type, exc_value, exc_traceback):
     logging.critical(f'Exception in PcBot main thread:\n{"".join(traceback_exception(exc_value))}')
-
-    def critical_setup(icon):
-        icon.visible = True
+    if icon:
+        icon.change_image('black')
         icon.notify(f"Exception in PcBot main thread: {repr(exc_value)}")
-
-    def _restart(icon):
-        handle_critical_error.restart_program = True
-        icon.stop()
-
-    handle_critical_error.restart_program = False
-
-    icon.menu = pystray.Menu(pystray.MenuItem('Restart', _restart), pystray.MenuItem('Exit', icon.stop))
-    icon.icon = create_image('black')
-    icon.run(setup=critical_setup)
-    return handle_critical_error.restart_program
 
 
 def toggle_debug():
-    global debug
-    debug = not debug
-    logging.basicConfig(level=20-debug*5)
-    if debug:
+    logger.setLevel(20+(logger.level-15)*-1)
+    if logger.level <= 15:
         logging.info('Debug logging enabled')
     else:
         logging.info('Debug logging disabled')
+
+
+def load_icon():
+    global conn, bgsrv, icon
+    for _ in range(3):
+        p = subprocess.Popen([sys.executable, 'PcBotIcon.py'])
+        for i in range(10):
+            try:
+                conn = rpyc.connect("localhost", 7778, service=PcBotService)
+                bgsrv = rpyc.BgServingThread(conn)
+                icon = conn.root
+                icon.change_image()
+                return
+            except ConnectionRefusedError:
+                logging.log(15, 'Icon process connection failed. Retrying...')
+                time.sleep(1)
+        logging.error('Failed to connect to icon process')
+        p.terminate()
+        time.sleep(10)
+    logging.critical('Failed to load icon')
 
 
 def check_requirements(requirements):
@@ -150,21 +157,12 @@ def check_requirements(requirements):
 
 
 def _stop_bot():
-    logger.info('Stopping bot updater')
-    updater.stop()  # TODO if command still in execution, this will block forever
+    logging.info('Stopping bot updater')
+    updater.stop()  # TODO if a command is still in execution, this will block forever
     logger.info('Bot updater stopped')
-    logger.info('Stopping icon loop')
+    logger.info('Stopping main loop')
     global stop_loop
     stop_loop = True
-
-
-def _restart_bot():
-    logger.info('Restarting program')
-    _stop_bot()
-    del sys.modules['dynamiccommands']
-    del sys.modules['commands']
-    global restart_program
-    restart_program = True
 
 
 def check_chat_id(update: telegram.Update):
@@ -201,20 +199,6 @@ class Status(Core.Command):
 
     def execute(self, update: telegram.Update, context: telegram.ext.CallbackContext):
         Core.send_message(update, f"Bot started\nplatform={sys.platform}\nuser={getpass.getuser()}")
-
-
-class RestartBot(Core.Command):
-    def name(self):
-        return 'restartbot'
-
-    def description(self):
-        return 'Restart bot'
-
-    def execute(self, update: telegram.Update, context: telegram.ext.CallbackContext):
-        Core.send_message(update, 'Restarting bot...')
-        import threading
-        t = threading.Thread(target=_restart_bot)
-        t.start()
 
 
 class Stop(Core.Command):
@@ -362,43 +346,21 @@ def handle_errors(update: telegram.Update, context: telegram.ext.CallbackContext
         logger.error(f"Exception not handled in handle_errors:{traceback_exception(e)}")
 
 
-def create_image(fill='limegreen'):
-    x = 21
-    y = x * 5 // 6
-    image = Image.new('RGBA', (x+1, y+1))
-    final_image = Image.new('RGBA', (x+1, x+1))
-    dc = ImageDraw.Draw(image)
+class PcBotService(rpyc.Service):
+    def exposed_toggle_debug(self):
+        toggle_debug()
 
-    x0_display = int(x*.1)
-    y0_display = int(y*.12)
-    x0_stand = int(x*.45)
-    y0_stand = int(y*.8)
-    x0_base = int(x*.30)
-    y0_base = int(y*39/40+1)
-
-    dc.rectangle((x0_base, y0_base, x-x0_base, y), fill='lightgray')  # base
-    dc.rectangle((x0_stand, y0_stand, x-x0_stand, y0_base), fill='lightgray')  # stand
-    dc.rectangle((0, 0, x, y0_stand), fill='white')  # frame
-    dc.rectangle((x0_display, y0_display, x-x0_display, y0_stand-y0_display), fill=fill)  # display
-    final_image.paste(image, (max(0, (y-x)//2), max(0, (x-y)//2)))
-    return final_image
+    def exposed_stop_bot(self):
+        _stop_bot()
 
 
 if __name__ == '__main__':
     custom_logs()
-    while True:
-        icon = pystray.Icon(f'PcBot_{time.time()}')
-        try:
-            restart_program = runpy.run_path(__file__, init_globals={'icon': icon}).get('restart_program', False)
-        except Exception as e:
-            restart_program = handle_critical_error(e)
-        if restart_program:
-            logging.info('Program thread exited. Restarting...')
-        else:
-            break
-    logging.info('Main thread exited')
-else:
-    debug = False
+
+    conn = None
+    icon = None
+    bgsrv = None
+    threading.Thread(target=load_icon).start()
 
     local_directory = {'win32': os.path.join(pathlib.Path.home(), 'AppData', 'Local', 'pcbot'), 'linux': os.path.join(pathlib.Path.home(), '.local', 'share', 'pcbot')}
     config = PcBotConfig.get_config()
@@ -412,9 +374,6 @@ else:
     logs_filename = os.path.join(Core.home, 'logs.txt')
     logger = logging.getLogger(__name__)
 
-    if __name__ != '<run_path>':
-        logger.critical("Program not started in the standard way")
-
     import commands
 
     unsatisfied_req = set()
@@ -425,7 +384,7 @@ else:
         logger.warning(f"Unsatisfied commands requirement(s): '{unsatisfied_req_str}'")
 
     def get_cmds():
-        return name_to_command([Status(), DynamicCommands(), *commands.commands, Start(), Commands(), Logs(), Reload(), RestartBot(), Stop()])
+        return name_to_command([Status(), DynamicCommands(), *commands.commands, Start(), Commands(), Logs(), Reload(), Stop()])
 
     cmds = get_cmds()
 
@@ -444,10 +403,7 @@ else:
 
     dynamiccmds = name_to_command(dynamiccmds)
 
-    icon: pystray.Icon
-    icon.menu = pystray.Menu(pystray.MenuItem('Debug', toggle_debug), pystray.MenuItem('Restart', _restart_bot), pystray.MenuItem('Exit', _stop_bot))
-
-    updater = Updater(token=config['bot_token'], use_context=True)
+    updater = Updater(token=config['bot_token'])
     dispatcher = updater.dispatcher
     Core.t_bot = telegram.Bot(token=config['bot_token'])
 
@@ -471,15 +427,14 @@ else:
     # for c_id in config['chat_ids']:
     #     Start().execute(chat_id=c_id)
 
-    logger.info(f"Logs file: {logs_filename}")
+    # logger.info(f"Logs file: {logs_filename}")
     logger.info("Bot started")
 
     stop_loop = False
 
-    def icon_loop(icon=None):
+    def main_loop():
         global stop_loop
-        icon.visible = True
-        logging.info('Icon loop started')
+        logging.info('Main loop started')
         while not stop_loop:
             try:
                 time.sleep(4)
@@ -488,18 +443,19 @@ else:
             except telegram.error.TimedOut:
                 logging.debug('Sending typing chat action failed')
             except (urllib3.exceptions.HTTPError, telegram.error.NetworkError):
-                icon.icon = create_image('red')
+                if icon:
+                    icon.change_image('red')
                 block_until_connected()
-                icon.icon = create_image()
+                if icon:
+                    icon.change_image()
             except Exception as e:
-                logger.critical(f"Exception not handled in icon loop:\n{traceback_exception(e)}")
-                icon.notify(f"Exception not handled in icon loop: {repr(e)}")
-        icon.visible = False
+                logger.critical(f"Exception not handled in main loop:\n{traceback_exception(e)}")
+                if icon:
+                    icon.notify(f"Exception not handled in main loop: {repr(e)}")
+        if icon:
+            bgsrv.stop()
+            conn.close()
         stop_loop = False
-        icon.stop()
-        logger.info('Icon loop ended')
+        logger.info('Main loop ended')
 
-    icon.icon = create_image()
-    icon.run(setup=icon_loop)
-
-
+    main_loop()
