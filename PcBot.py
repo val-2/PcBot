@@ -5,7 +5,7 @@ import logging
 import os.path
 import pathlib
 import socket
-import subprocess
+import multiprocessing
 import sys
 import threading
 import time
@@ -20,9 +20,10 @@ from telegram.ext import Updater, Filters, CommandHandler, MessageHandler  # , C
 
 import PcBotConfig
 import PcBotCore as Core
+import PcBotIcon
 
 
-def name_to_command(c):
+def dict_from_commands(c):
     d = {}
     for i in c:
         d[i.name()] = i
@@ -107,37 +108,70 @@ def traceback_exception(e):
 
 def handle_critical_error(exc_type, exc_value, exc_traceback):
     logging.critical(f'Exception in PcBot main thread:\n{"".join(traceback_exception(exc_value))}')
-    if icon:
-        icon.change_image('black')
-        icon.notify(f"Exception in PcBot main thread: {repr(exc_value)}")
+    if 'icon' in globals():
+        if icon.connected:
+            icon.change_image('black')
+            icon.notify(f"Exception in PcBot main thread: {repr(exc_value)}")
 
 
 def toggle_debug():
-    logger.setLevel(20+(logger.level-15)*-1)
-    if logger.level <= 15:
-        logging.info('Debug logging enabled')
-    else:
-        logging.info('Debug logging disabled')
+    logger.setLevel(35-logger.level)
+    status = {False: "disabled", True: "enabled"}[logger.level <= 15]
+    logging.info(f'Debug logging {status}')
+    return status
 
 
-def load_icon():
-    global conn, bgsrv, icon
-    for _ in range(3):
-        p = subprocess.Popen([sys.executable, 'PcBotIcon.py'])
-        for i in range(10):
+class UselessClass:
+    def __getattr__(self, item):
+        return UselessClass()
+
+    def __call__(self, *args, **kwargs):
+        logger.log(15, 'Not connected to icon process')
+
+
+class Icon:
+    def __init__(self):
+        self.connected = False
+        self.fills = ['limegreen']
+        self.conn = UselessClass()
+        self.bgsrv = UselessClass()
+        self.p = multiprocessing.Process(target=PcBotIcon.main, daemon=True)
+        self.p.start()
+        threading.Thread(target=self.connect, daemon=True).start()
+
+    def connect(self):
+        for i in range(5):
             try:
-                conn = rpyc.connect("localhost", 7778, service=PcBotService)
-                bgsrv = rpyc.BgServingThread(conn)
-                icon = conn.root
-                icon.change_image()
-                return
+                self.conn = rpyc.connect("localhost", 7778, service=PcBotService)
             except ConnectionRefusedError:
-                logging.log(15, 'Icon process connection failed. Retrying...')
+                logger.error('Connection to icon process failed. Retrying...')
                 time.sleep(1)
-        logging.error('Failed to connect to icon process')
-        p.terminate()
-        time.sleep(10)
-    logging.critical('Failed to load icon')
+                continue
+            self.bgsrv = rpyc.BgServingThread(self.conn)
+            self.change_image(self.fills[-1])
+            self.connected = True
+            logger.info('Connection to icon process established')
+            return
+        else:
+            logger.critical('Failed to connect to icon process')
+            self.p.terminate()
+
+    def change_image(self, fill='limegreen'):
+        if not self.connected:
+            self.fills.append(fill)
+        self.conn.root.change_image(fill)
+
+    def visible(self, visible):
+        self.conn.root.visible(visible)
+
+    def notify(self, s):
+        self.conn.root.notify(s)
+
+    def menu(self, m):  # not working with callables
+        self.conn.root.menu(m)
+
+    def update_menu(self):
+        self.conn.root.update_menu()
 
 
 def check_requirements(requirements):
@@ -157,18 +191,20 @@ def check_requirements(requirements):
 
 
 def _stop_bot():
-    logging.info('Stopping bot updater')
-    updater.stop()  # TODO if a command is still in execution, this will block forever
-    logger.info('Bot updater stopped')
-    logger.info('Stopping main loop')
-    global stop_loop
-    stop_loop = True
+    logging.info('Stopping bot')
+    os._exit(0)
+    # logging.info('Stopping bot updater')
+    # updater.stop()
+    # logger.info('Bot updater stopped')
+    # logger.info('Stopping main loop')
+    # global stop_loop
+    # stop_loop = True
 
 
 def check_chat_id(update: telegram.Update):
     if update.message.chat_id not in config['chat_ids']:
-        for c in config['chat_ids']:
-            Core.send_message(c, f"Unauthorized user {update.message.from_user.name} with chat id {update.message.chat_id} sent message", log_level=logging.WARNING)
+        for conf in config['chat_ids']:
+            Core.send_message(conf, f"Unauthorized user {update.message.from_user.name} with chat id {update.message.chat_id} sent message", log_level=logging.WARNING)
         Core.send_message(update, 'User not authorized')
         return False
     else:
@@ -238,6 +274,17 @@ class Logs(Core.Command):
         Core.t_bot.send_document(update.message.chat_id, document=BytesIO(sys.stdout.intercepted[1].getvalue().encode()), filename='logs.txt')
 
 
+class Debug(Core.Command):
+    def name(self):
+        return 'debug'
+
+    def description(self):
+        return 'Toggle debug'
+
+    def execute(self, update: telegram.Update, context: telegram.ext.CallbackContext):
+        Core.send_message(update, f'Debug logging {toggle_debug()}')
+
+
 class Reload(Core.Command):
     def name(self):
         return 'reload'
@@ -249,7 +296,7 @@ class Reload(Core.Command):
         del sys.modules['dynamiccommands']
         import dynamiccommands
         global dynamiccmds
-        dynamiccmds = name_to_command(dynamiccommands.dynamiccmds)
+        dynamiccmds = dict_from_commands(dynamiccommands.dynamiccmds)
 
         del sys.modules['commands']
         global cmds
@@ -334,7 +381,7 @@ def handle_all_the_rest(update: telegram.Update, context: telegram.ext.CallbackC
         Core.send_message(update, "Unhandled message")
 
 
-def handle_errors(update: telegram.Update, context: telegram.ext.CallbackContext):
+def handle_errors(update, context: telegram.ext.CallbackContext) -> None:
     try:
         raise context.error
     except telegram.error.Conflict as e:
@@ -347,20 +394,21 @@ def handle_errors(update: telegram.Update, context: telegram.ext.CallbackContext
 
 
 class PcBotService(rpyc.Service):
-    def exposed_toggle_debug(self):
+    @staticmethod
+    def exposed_toggle_debug():
         toggle_debug()
 
-    def exposed_stop_bot(self):
+    @staticmethod
+    def exposed_stop_bot():
         _stop_bot()
 
 
 if __name__ == '__main__':
     custom_logs()
+    logger = logging.getLogger(__name__)
+    logger.setLevel(20)
 
-    conn = None
-    icon = None
-    bgsrv = None
-    threading.Thread(target=load_icon).start()
+    icon = Icon()
 
     local_directory = {'win32': os.path.join(pathlib.Path.home(), 'AppData', 'Local', 'pcbot'), 'linux': os.path.join(pathlib.Path.home(), '.local', 'share', 'pcbot')}
     config = PcBotConfig.get_config()
@@ -370,9 +418,6 @@ if __name__ == '__main__':
         os.mkdir(Core.media)
     except FileExistsError:
         pass
-
-    logs_filename = os.path.join(Core.home, 'logs.txt')
-    logger = logging.getLogger(__name__)
 
     import commands
 
@@ -384,7 +429,7 @@ if __name__ == '__main__':
         logger.warning(f"Unsatisfied commands requirement(s): '{unsatisfied_req_str}'")
 
     def get_cmds():
-        return name_to_command([Status(), DynamicCommands(), *commands.commands, Start(), Commands(), Logs(), Reload(), Stop()])
+        return dict_from_commands([Status(), DynamicCommands(), *commands.commands, Start(), Commands(), Logs(), Debug(), Reload(), Stop()])
 
     cmds = get_cmds()
 
@@ -401,7 +446,7 @@ if __name__ == '__main__':
         unsatisfied_req_dyn_str = "' '".join(unsatisfied_req_dyn)
         logger.warning(f"Unsatisfied dynamic commands requirement(s): '{unsatisfied_req_dyn_str}'")
 
-    dynamiccmds = name_to_command(dynamiccmds)
+    dynamiccmds = dict_from_commands(dynamiccmds)
 
     updater = Updater(token=config['bot_token'])
     dispatcher = updater.dispatcher
@@ -427,15 +472,13 @@ if __name__ == '__main__':
     # for c_id in config['chat_ids']:
     #     Start().execute(chat_id=c_id)
 
-    # logger.info(f"Logs file: {logs_filename}")
     logger.info("Bot started")
 
-    stop_loop = False
+    stop_loop = threading.Event()
 
     def main_loop():
-        global stop_loop
         logging.info('Main loop started')
-        while not stop_loop:
+        while not stop_loop.is_set():
             try:
                 time.sleep(4)
                 for c_id in config['chat_ids']:
@@ -443,19 +486,15 @@ if __name__ == '__main__':
             except telegram.error.TimedOut:
                 logging.debug('Sending typing chat action failed')
             except (urllib3.exceptions.HTTPError, telegram.error.NetworkError):
-                if icon:
-                    icon.change_image('red')
+                icon.change_image('red')
                 block_until_connected()
-                if icon:
-                    icon.change_image()
+                icon.change_image()
             except Exception as e:
                 logger.critical(f"Exception not handled in main loop:\n{traceback_exception(e)}")
-                if icon:
-                    icon.notify(f"Exception not handled in main loop: {repr(e)}")
-        if icon:
-            bgsrv.stop()
-            conn.close()
-        stop_loop = False
+                icon.notify(f"Exception not handled in main loop: {repr(e)}")
+        icon.bgsrv.stop()
+        icon.conn.close()
+        stop_loop.clear()
         logger.info('Main loop ended')
 
     main_loop()
