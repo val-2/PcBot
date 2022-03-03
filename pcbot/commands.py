@@ -1,4 +1,4 @@
-import PcBotCore as Core
+import pcbot.PcBotCore as Core
 
 
 class Screen(Core.Command):
@@ -22,7 +22,7 @@ class Screen(Core.Command):
 
         args = Core.join_args(update)
         s = screenmss.screenshot()
-        Core.t_bot.send_chat_action(chat_id=update.message.chat_id, action=Core.telegram.ChatAction.UPLOAD_PHOTO)
+        context.bot.send_chat_action(chat_id=update.message.chat_id, action=Core.telegram.ChatAction.UPLOAD_PHOTO)
         if args and not ignore_args:
             lossless = True
         Core.logger.debug("Screenshot taken")
@@ -140,7 +140,7 @@ class Mouse(Core.Command):
 
         s = screenmss.screenshot()
         Core.logger.debug("Screenshot taken")
-        Core.t_bot.send_chat_action(chat_id=update.message.chat_id, action=Core.telegram.ChatAction.UPLOAD_PHOTO)
+        context.bot.send_chat_action(chat_id=update.message.chat_id, action=Core.telegram.ChatAction.UPLOAD_PHOTO)
         im = Image.frombytes("RGB", s.size, s.bgra, "raw", "BGRX")
 
         if min(pyautogui.size()) * self.multiplier > 17:
@@ -223,7 +223,7 @@ class Ip(Core.Command):
         return 'ip'
 
     def description(self):
-        return 'Get locan and external IP'
+        return 'Get local and external IP'
 
     def requirements(self):
         return ['requests']
@@ -579,4 +579,4 @@ class MsgBox(Core.Command):
             Core.send_message(update, "Display not connected. Msgbox unavailable")
 
 
-commands = [Screen(), Torrent(), Keyboard(), Mouse(), Cmd(), Ip(), Download(), Lock(), Logout(), Suspend(), Hibernate(), Reboot(), Shutdown(), Volume(), MsgBox()]
+commands = [Screen, Torrent, Keyboard, Mouse, Cmd, Ip, Download, Lock, Logout, Suspend, Hibernate, Reboot, Shutdown, Volume, MsgBox]

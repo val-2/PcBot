@@ -77,4 +77,4 @@ class Refind(Core.DynamicCommand):
             Core.send_message(update, f'OS set for next reboot. Use /reboot to use it immediately', reply_markup=Core.telegram.ReplyKeyboardRemove())
 
 
-dynamiccmds = [Destiny(), Refind()]
+dynamic_commands = [Destiny, Refind]
