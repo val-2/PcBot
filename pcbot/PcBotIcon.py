@@ -28,7 +28,7 @@ def create_image(fill='limegreen'):
     return final_image
 
 
-def main():
+def main(port=17778):
 
     def setup(i):
         i.visible = True
@@ -50,14 +50,12 @@ def main():
         def on_disconnect(self, conn):
             self.conn = None
             self.icon.menu = None
-            self.icon.update_menu()
-            self.exposed_change_image('gray')
             threading.Thread(target=self.stop).start()
 
         def exposed_change_image(self, fill='limegreen'):
             self.icon.icon = create_image(fill)
 
-        def exposed_visible(self, visible):
+        def exposed_visible(self, visible: bool):
             self.icon.visible = visible
 
         def exposed_notify(self, s):
@@ -84,7 +82,11 @@ def main():
             rpc_server.close()
             self.icon.stop()
 
-    rpc_server = rpyc.ThreadPoolServer(service=PcBotIconService, port=17778)
+    rpc_server = rpyc.ThreadPoolServer(service=PcBotIconService, port=port)
     icon = pystray.Icon(f'PcBot_{time.time()}')
     icon.icon = create_image('gray')
     icon.run(setup=setup)
+
+
+if __name__ == '__main__':
+    main()

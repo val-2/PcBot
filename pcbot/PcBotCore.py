@@ -1,10 +1,17 @@
 import abc
 import logging
+import pathlib
 import queue
 import threading
 import time
 
 import telegram.ext
+
+try:
+    import pystray
+    GRAPHICAL_SESSION_SET = True
+except ValueError:
+    GRAPHICAL_SESSION_SET = False
 
 
 class Command(abc.ABC):
@@ -25,6 +32,10 @@ class Command(abc.ABC):
     @abc.abstractmethod
     def execute(self, update: telegram.Update, context: telegram.ext.CallbackContext):
         raise NotImplementedError
+
+    @staticmethod
+    def can_be_used():
+        return True
 
 
 class DynamicCommand(abc.ABC):
@@ -85,7 +96,7 @@ class MessageQueue(queue.Queue):
 
 
 def join_args(update):
-    return " ".join(update.message["text"].split(" ")[1:])
+    return " ".join(update.message.text.split(" ")[1:])
 
 
 def send_message(update: telegram.Update, text, log_level=logging.INFO, **kwargs):
@@ -104,6 +115,6 @@ def send_message_chat_id(chat_id, text, bot, log_level=logging.INFO, **kwargs):
 
 
 msg_queue = MessageQueue()
-home: str = None
-media: str = None
+home: pathlib.Path = None
+media: pathlib.Path = None
 logger = logging.getLogger(__name__)

@@ -9,19 +9,22 @@ class Screen(Core.Command):
         return 'Get a screenshot'
 
     def requirements(self):
-        return ['pyautogui', 'pillow']  # 'screenmss'
+        return ['pyautogui', 'pillow']
+
+    def can_be_used(self):
+        return Core.GRAPHICAL_SESSION_SET
 
     def execute(self, update, context, ignore_args=False, cursor=True, lossless=None):
-        import pyautogui
-        import screenmss
-        from PIL import Image, ImageDraw
         import io
-        import sys
+        import pyautogui
+        import mss
+        from PIL import Image, ImageDraw
 
         pyautogui.FAILSAFE = False
+        sct = mss.mss()
 
         args = Core.join_args(update)
-        s = screenmss.screenshot()
+        s = sct.grab(sct.monitors[0])
         context.bot.send_chat_action(chat_id=update.message.chat_id, action=Core.telegram.ChatAction.UPLOAD_PHOTO)
         if args and not ignore_args:
             lossless = True
@@ -62,6 +65,9 @@ class Keyboard(Core.Command):
     def requirements(self):
         return ['pyautogui']
 
+    def can_be_used(self):
+        return Core.GRAPHICAL_SESSION_SET
+
     def execute(self, update, context):
         import pyautogui
 
@@ -73,6 +79,8 @@ class Keyboard(Core.Command):
 
 
 class Mouse(Core.Command):
+    multiplier: float = 0.25
+
     def name(self):
         return 'mouse'
 
@@ -80,7 +88,10 @@ class Mouse(Core.Command):
         return 'Emulate mouse'
 
     def requirements(self):
-        return ['pyautogui', 'pillow']  # 'screenmss'
+        return ['pyautogui', 'pillow']
+
+    def can_be_used(self):
+        return Core.GRAPHICAL_SESSION_SET
 
     def execute(self, update, context):
         import pyautogui
@@ -91,8 +102,6 @@ class Mouse(Core.Command):
                            ['⬅',       'left click',       '➡'],
                            ['reduce',       '⬇',   'increase']]
         reply_markup = Core.telegram.ReplyKeyboardMarkup(custom_keyboard)
-
-        self.multiplier = 0.25
 
         def increase():
             self.multiplier *= 4 if min(pyautogui.size()) * self.multiplier >= 1 else self.multiplier
@@ -131,14 +140,15 @@ class Mouse(Core.Command):
 
     def send_grid(self, update, context):
         import pyautogui
-        import screenmss
         from PIL import Image, ImageDraw
         import io
         import math
+        import mss
 
         pyautogui.FAILSAFE = False
+        sct = mss.mss()
 
-        s = screenmss.screenshot()
+        s = sct.grab(sct.monitors[0])
         Core.logger.debug("Screenshot taken")
         context.bot.send_chat_action(chat_id=update.message.chat_id, action=Core.telegram.ChatAction.UPLOAD_PHOTO)
         im = Image.frombytes("RGB", s.size, s.bgra, "raw", "BGRX")
@@ -179,43 +189,72 @@ class Cmd(Core.Command):
     def description(self):
         return 'Execute command'
 
-    def execute(self, update, context, args=None, confirmation='🆗\n', shell=True):
+    def execute(self, update, context, args=None, shell=True):
         import subprocess
-        import async_streamer
+        from queue import Queue, Empty
+        from concurrent.futures import ThreadPoolExecutor
 
         if not args:
             args = Core.join_args(update)
-            message = args + "\n"
+            message = f'> {args}\n'
         else:
             if isinstance(args, list):
-                message = " ".join(args) + "\n"
+                message = f'> {" ".join(args)}\n'
             else:
-                message = args + "\n"
+                message = f'> {args}\n'
         p = subprocess.Popen(args, shell=shell, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.PIPE, text=True)
         sent = Core.send_message(update, message)
-        stdout = async_streamer.AsyncReader(p.stdout.readline)
-        while True:
-            output = "".join(stdout.get(0.1))
-            if output:
-                message += output
+
+        output = ''
+
+        with ThreadPoolExecutor(2) as pool:
+            q_stdout, q_stderr = Queue(), Queue()
+
+            pool.submit(self.enqueue_output, p.stdout, q_stdout)
+            pool.submit(self.enqueue_output, p.stderr, q_stderr)
+
+            while True:
+                if p.poll() is not None and q_stdout.empty() and q_stderr.empty():
+                    break
+
+                out_line = err_line = ''
                 try:
-                    sent.edit_text(message)
-                except Core.telegram.error.TimedOut as e:
-                    if str(e) == "urllib3 HTTPError [SSL: DECRYPTION_FAILED_OR_BAD_RECORD_MAC] decryption failed or bad record mac (_ssl.c:2508)":
-                        Core.logger.warning("Network error while editing message for cmd")
-                    else:
-                        raise
-            inputs = Core.msg_queue.get(0)
-            for i in inputs:
-                p.stdin.write(i + "\n")
-                p.stdin.flush()
-            # sleep(1)
-            if p.poll() is not None:
-                message += confirmation
-                sent.edit_text(message)
-                break
-        Core.logger.info("Command executed")
+                    out_line = q_stdout.get_nowait().strip()
+                    out_line += '\n'
+                except Empty:
+                    pass
+                try:
+                    err_line = q_stderr.get_nowait().strip()
+                    err_line += '\n'
+                except Empty:
+                    pass
+
+                output = out_line + err_line
+                message += output
+                if output.strip():
+                    try:
+                        sent.edit_text(message)
+                    except Core.telegram.error.TimedOut as e:
+                        if str(e) == "urllib3 HTTPError [SSL: DECRYPTION_FAILED_OR_BAD_RECORD_MAC] decryption failed or bad record mac (_ssl.c:2508)":
+                            Core.logger.warning("Network error while editing message for cmd")
+                            Core.send_message(update, "Network error while editing message for cmd")
+                        else:
+                            raise
+                inputs = Core.msg_queue.get(0)
+                for i in inputs:
+                    p.stdin.write(i + "\n")
+                    p.stdin.flush()
+                # sleep(1)
+        message += f'Process finished with exit code {p.returncode}'
+        sent.edit_text(message)
+        Core.logger.info("Command finished")
         return output
+
+    @staticmethod
+    def enqueue_output(file, queue):
+        for line in iter(file.readline, ''):
+            queue.put(line)
+        file.close()
 
 
 class Ip(Core.Command):
@@ -251,7 +290,7 @@ class Torrent(Core.Command):
         return 'torrent'
 
     def description(self):
-        return 'Download a torrent'
+        return 'Download a torrent with Transmission'
 
     def execute(self, update, context):
         import subprocess
@@ -448,13 +487,13 @@ class Suspend(Core.Command):
         time.sleep(int(args))
         Core.send_message(update, "Suspending system")
         if sys.platform == "linux":
-            subprocess.check_output(["systemctl", "suspend"])
+            subprocess.Popen(["systemctl", "suspend"])
         elif sys.platform == "win32":
             try:
-                subprocess.check_output(['nircmdc.exe', 'standby'])
+                subprocess.Popen(['nircmdc.exe', 'standby'])
             except FileNotFoundError:
                 Core.send_message(update, 'Warning: this command will hibernate if hibernation is active. Disable hibernation or add nircmdc.exe to path')
-                subprocess.check_output(['rundll32.exe', 'powrprof.dll,SetSuspendState', '0,1,0'])
+                subprocess.Popen(['rundll32.exe', 'powrprof.dll,SetSuspendState', '0,1,0'])
 
 
 class Hibernate(Core.Command):
@@ -475,9 +514,9 @@ class Hibernate(Core.Command):
         time.sleep(int(args))
         Core.send_message(update, "Hibernating system")
         if sys.platform == "linux":
-            subprocess.check_output(["systemctl", "hibernate"])
+            subprocess.Popen(["systemctl", "hibernate"])
         elif sys.platform == "win32":
-            subprocess.check_output(['shutdown', '-h'])
+            subprocess.Popen(['shutdown', '-h'])
 
 
 class Reboot(Core.Command):
@@ -498,9 +537,9 @@ class Reboot(Core.Command):
         Core.send_message(update, "Rebooting system")
         if sys.platform == "linux":
             time.sleep(int(args))
-            subprocess.check_output(["reboot"])
+            subprocess.Popen(["reboot"])
         elif sys.platform == "win32":
-            subprocess.check_output(['shutdown', '-r', '-f', '-t', args])
+            subprocess.Popen(['shutdown', '-r', '-f', '-t', args])
 
 
 class Shutdown(Core.Command):
@@ -536,6 +575,9 @@ class Volume(Core.Command):
     def requirements(self):
         return ['pyautogui;platform_system=="Windows"']
 
+    def can_be_used(self):
+        return Core.GRAPHICAL_SESSION_SET
+
     def execute(self, update, context):
         import subprocess
         import sys
@@ -566,11 +608,17 @@ class MsgBox(Core.Command):
     def requirements(self):
         return ['PyMsgBox']
 
+    def can_be_used(self):
+        return Core.GRAPHICAL_SESSION_SET
+
     def execute(self, update, context):
         import pymsgbox
         import _tkinter
 
         args = Core.join_args(update)
+        if not args:
+            Core.send_message(update, "Inviare messaggio da inserire nella MsgBox")
+            args = Core.msg_queue.get()[0]
         try:
             Core.send_message(update, "Showing MessageBox...")
             pymsgbox.alert(text=args)
@@ -579,4 +627,4 @@ class MsgBox(Core.Command):
             Core.send_message(update, "Display not connected. Msgbox unavailable")
 
 
-commands = [Screen, Torrent, Keyboard, Mouse, Cmd, Ip, Download, Lock, Logout, Suspend, Hibernate, Reboot, Shutdown, Volume, MsgBox]
+commands = [Screen, Keyboard, Mouse, Cmd, Ip, Download, Lock, Logout, Suspend, Hibernate, Reboot, Shutdown, MsgBox]

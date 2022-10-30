@@ -3,3 +3,4 @@ urllib3
 pystray
 pillow
 rpyc
+customlogs @ https://gitlab.com/val-2/custom-logs/-/archive/main/custom-logs-main.tar.gz

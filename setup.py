@@ -8,7 +8,7 @@ with open("requirements.txt", "r") as fh:
 
 setuptools.setup(
     name='PcBot',
-    version=0.5,
+    version="0.6",
     description='PcBot',
     long_description=long_description,
     long_description_content_type="text/markdown",
